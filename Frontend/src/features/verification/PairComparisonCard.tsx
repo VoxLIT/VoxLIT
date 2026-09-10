@@ -1,6 +1,7 @@
-import { AlertTriangle, CheckCircle2, GitCompareArrows, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, GitCompareArrows, HelpCircle, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import type { BatchAnalysisResponse } from "./batchTypes";
 
 interface PairComparisonCardProps {
@@ -41,13 +42,14 @@ export const PairComparisonCard = ({ selectedLabels, batchResult, labelToIndex }
     indexA !== undefined && indexB !== undefined ? computePairDetails(batchResult, indexA, indexB) : null;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <GitCompareArrows className="h-4 w-4" /> Pair comparison
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
+    <TooltipProvider>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <GitCompareArrows className="h-4 w-4" /> Pair comparison
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
         {!hasPair && (
           <p className="text-xs text-muted-foreground">Select exactly two points in the plot to compare.</p>
         )}
@@ -62,15 +64,47 @@ export const PairComparisonCard = ({ selectedLabels, batchResult, labelToIndex }
               <span className="truncate">{batchResult.labels[indexB]}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Cosine similarity</span>
+              <span className="flex items-center gap-1 text-muted-foreground">
+                Cosine similarity
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
+                  </TooltipTrigger>
+                  <TooltipContent className="text-xs space-y-1">
+                    <p>How alike these two recordings&apos; voice embeddings are, from -1 to 1. Higher means more similar.</p>
+                    <p>This is evidence toward the same/different-speaker call, judged against the threshold below — not proof of identity on its own.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </span>
               <Badge variant="secondary">{formatScore(pairDetails.similarity)}</Badge>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Pair threshold ({batchResult.model_label})</span>
+              <span className="flex items-center gap-1 text-muted-foreground">
+                Pair threshold ({batchResult.model_label})
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
+                  </TooltipTrigger>
+                  <TooltipContent className="text-xs space-y-1">
+                    <p>The calibrated similarity cutoff this model uses to decide same speaker vs. different speakers for a pair.</p>
+                    <p>Separately calibrated from the clustering distance threshold, so the two can be different values.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </span>
               <Badge variant="secondary">{formatScore(batchResult.threshold)}</Badge>
             </div>
             <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Threshold margin</span>
+              <span className="flex items-center gap-1 text-muted-foreground">
+                Threshold margin
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
+                  </TooltipTrigger>
+                  <TooltipContent className="text-xs space-y-1">
+                    <p>How far this pair&apos;s similarity sits from the decision boundary. A margin near zero means the same/different call was close.</p>
+                  </TooltipContent>
+                </Tooltip>
+              </span>
               <Badge
                 variant="secondary"
                 className={pairDetails.margin >= 0 ? "text-emerald-700" : "text-rose-700"}
@@ -123,7 +157,8 @@ export const PairComparisonCard = ({ selectedLabels, batchResult, labelToIndex }
             )}
           </div>
         )}
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </TooltipProvider>
   );
 };

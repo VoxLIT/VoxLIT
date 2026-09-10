@@ -124,12 +124,18 @@ class _ECAPAAdapter(_BaseAdapter):
     def __init__(self, spec: SpeakerModelSpec) -> None:
         super().__init__(spec.embedding_dimension)
         try:
+            # SpeechBrain 1.1.0 registers LazyModule objects in sys.modules. Torch's
+            # register_fake() calls inspect.getmodule(), which hasattr()s every entry
+            # in sys.modules and thereby wakes those lazy modules -- including
+            # speechbrain.integrations.k2_fsa, which needs the optional 'k2' package
+            # (no Windows wheels). Resolving torch.distributed.tensor first means
+            # register_fake runs while sys.modules is still clean. Do not remove.
+            import torch.distributed.tensor  # noqa: F401
             from speechbrain.inference.classifiers import EncoderClassifier
             from speechbrain.utils.fetching import FetchConfig, LocalStrategy
         except ImportError as error:
             raise SpeakerModelUnavailable(
-                "ECAPA-TDNN requires the 'speechbrain' package. "
-                "Install the backend requirements and restart the API."
+                f"ECAPA-TDNN could not load its speechbrain dependencies: {error}"
             ) from error
 
         savedir = settings.speaker_verification_ecapa_dir_for_revision(spec.revision)
@@ -171,11 +177,14 @@ class _WeSpeakerAdapter(_BaseAdapter):
     def __init__(self, spec: SpeakerModelSpec) -> None:
         super().__init__(spec.embedding_dimension)
         try:
+            # See the comment in _ECAPAAdapter: torch.distributed.tensor must resolve
+            # before speechbrain's LazyModules enter sys.modules. pyannote.audio
+            # imports speechbrain, so this adapter needs the same guard.
+            import torch.distributed.tensor  # noqa: F401
             from pyannote.audio import Inference, Model
         except ImportError as error:
             raise SpeakerModelUnavailable(
-                "ResNet34-LM requires the 'pyannote.audio' package. "
-                "Install the backend requirements and restart the API."
+                f"ResNet34-LM could not load its pyannote.audio dependencies: {error}"
             ) from error
 
         hf_cache_dir = settings.speaker_verification_hf_cache_dir

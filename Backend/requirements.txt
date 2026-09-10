@@ -1,29 +1,51 @@
+# --- Web framework ---
 fastapi==0.111.0
 uvicorn[standard]==0.30.0
+python-multipart>=0.0.6
+
+# --- Cache / config ---
 redis==5.0.7
 pydantic-settings==2.3.4
-httpx==0.27.0
+
+# --- Testing ---
 pytest==8.2.0
 pytest-asyncio==0.23.7
 fakeredis==2.23.2
+httpx==0.27.0
 anyio==4.4.0
-transformers>=4.30.0
-torch>=2.6.0
-librosa>=0.10.0
-soundfile>=0.12.0
-python-multipart>=0.0.6
+
+# --- Core ML runtime ---
+# torch is upper-bounded on purpose. Leaving it open lets pip pull a much
+# newer torch, which breaks torchvision (installed transitively, pinned to
+# torch==2.6.0) and has already caused a broken environment once.
+torch>=2.6.0,<2.7
+torchaudio>=2.6.0,<2.7
+transformers>=4.30.0,<4.54
+huggingface_hub==0.36.2
+accelerate
+
+# --- Numerics ---
+# numpy is held below 2.0 for compatibility with the pinned ML stack.
+numpy>=1.24,<2.0
+scipy
+pandas
 scikit-learn>=1.3.0
 umap-learn>=0.5.3
-numpy>=1.24,<2.0
-pandas
+
+# --- Audio ---
+librosa>=0.10.0
+soundfile>=0.12.0
+
+# --- Explainability ---
 captum>=0.6.0
 lime>=0.2.0
 shap>=0.42.0
-accelerate
-torchaudio
+matplotlib
+
+# --- Speaker verification / diarization ---
+# speechbrain must stay at 1.1.0: the ECAPA-TDNN loader in
+# app/tasks/verification/service.py imports FetchConfig from
+# speechbrain.utils.fetching, which does not exist before 1.1.0.
+# Downgrading to 1.0.x breaks ECAPA-TDNN.
 speechbrain==1.1.0
 pyannote.audio==3.4.0
-huggingface_hub==0.36.2
-
-pyannote.audio>=3.1,<3.4
-matplotlib

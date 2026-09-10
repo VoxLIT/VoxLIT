@@ -517,7 +517,7 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
                       size="sm"
                       variant="secondary"
                       onClick={handleFetchEmbeddings}
-                      disabled={isLoading || availableFiles.length === 0 || !legacyEmbeddings}
+                      disabled={isLoading || availableFiles.length === 0 || (!legacyEmbeddings && !verificationMode)}
                       className="h-7 w-7 p-0"
                     >
                       <RefreshCw className={`h-3 w-3 ${isLoading ? 'animate-spin text-primary' : ''}`} />
