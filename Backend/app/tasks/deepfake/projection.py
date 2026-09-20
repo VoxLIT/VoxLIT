@@ -41,6 +41,9 @@ def reduce_embedding_matrix(
         # UMAP requires n_neighbors >= 2, which requires >= 3 samples under
         # any initialization strategy — deterministic, documented fallback.
         method_used = "pca"
+    elif reduction_method == "tsne" and n_samples < 2:
+        # t-SNE cannot define a positive perplexity (n_samples - 1) for one sample.
+        method_used = "pca"
 
     try:
         if method_used == "pca":

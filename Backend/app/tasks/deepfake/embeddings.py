@@ -23,7 +23,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.redis import cache_result, get_result
 
-from .dataset import list_recordings, resolve_recording_path
+from .dataset import DatasetUnavailable, list_recordings, resolve_recording_path
 from .projection import reduce_embedding_matrix
 from .service import file_sha256, get_model_spec, run_embedding
 
@@ -66,6 +66,10 @@ async def project_dataset(
     """Score every recording, then reduce the embeddings to 2 or 3 axes."""
     spec = get_model_spec(model_key)
     recordings = list_recordings()
+    if not recordings:
+        # The folder exists but holds no clips: nothing to plot, and an empty
+        # matrix has no columns to reduce.
+        raise DatasetUnavailable("The deepfake demo dataset contains no recordings.")
 
     async with _scoring_lock(model_key):
         payloads = [

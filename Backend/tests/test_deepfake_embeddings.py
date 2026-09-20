@@ -267,3 +267,36 @@ async def test_embeddings_maps_model_load_failure_to_503(
 
     assert response.status_code == 503
     assert "could not load" in response.json()["detail"]
+
+
+# --- edge cases: tiny and empty datasets ----------------------------------
+
+
+@pytest.mark.parametrize("method", ["pca", "tsne", "umap"])
+@pytest.mark.parametrize("n_components", [2, 3])
+def test_projection_of_a_single_recording_never_raises(method, n_components):
+    """One clip has no perplexity (t-SNE) or neighbours (UMAP); both fall back to PCA."""
+    from app.tasks.deepfake.projection import reduce_embedding_matrix
+    import numpy as np
+
+    matrix = np.random.default_rng(0).normal(size=(1, EMBEDDING_DIM))
+
+    coordinates, effective, used = reduce_embedding_matrix(matrix, method, n_components)
+
+    assert coordinates.shape == (1, n_components)
+    assert used == "pca"
+    assert effective <= n_components
+
+
+async def test_embeddings_reports_a_dataset_with_no_recordings(
+    client, monkeypatch, tmp_path, stub_embedding
+):
+    monkeypatch.setattr(settings, "DEEPFAKE_DATASET_ROOT", tmp_path)
+    (tmp_path / "asvspoof2019_la" / "flac").mkdir(parents=True)
+
+    response = await client.post(
+        "/tasks/deepfake/embeddings", json={"model": "xlsr-deepfake", "n_components": 2}
+    )
+
+    assert response.status_code == 404
+    assert stub_embedding == []
