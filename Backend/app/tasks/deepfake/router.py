@@ -24,10 +24,12 @@ from .dataset import (
     list_recordings,
     resolve_recording_path,
 )
+from .embeddings import project_dataset
 from .evaluation import evaluate_dataset
 from .saliency import METHOD as SALIENCY_METHOD, SaliencyUnavailable, generate_saliency
 from .silence_probe import SILENCE_TOP_DB, run_silence_probe
 from .metrics import NotEnoughLabelledData
+from .projection import SUPPORTED_PROJECTION_COMPONENTS, SUPPORTED_REDUCTION_METHODS
 from .service import (
     THRESHOLD_VERSION,
     DeepfakeModelUnavailable,
@@ -125,6 +127,46 @@ async def evaluation(request: EvaluationRequest):
         raise HTTPException(status_code=422, detail=str(error)) from error
     except DeepfakeModelUnavailable as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+class EmbeddingProjectionRequest(BaseModel):
+    model: str
+    reduction_method: str = "pca"
+    n_components: int = 2
+
+
+@router.post("/embeddings")
+async def embedding_projection(request: EmbeddingProjectionRequest):
+    """Feature 4 — 2D/3D embedding view of the whole demo dataset.
+
+    Visualisation only: each point is the vector the detector's classification
+    head read for one clip, reduced to 2 or 3 axes. Points carry the model's own
+    score, never the bona fide/spoof label. The first call per model scores the
+    whole dataset and can take minutes; per-clip vectors are cached afterwards,
+    so changing the method or 2D/3D is fast.
+    """
+    try:
+        get_model_spec(request.model)
+    except UnsupportedDeepfakeModel as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    if request.reduction_method not in SUPPORTED_REDUCTION_METHODS:
+        allowed = ", ".join(sorted(SUPPORTED_REDUCTION_METHODS))
+        raise HTTPException(
+            status_code=400, detail=f"reduction_method must be one of: {allowed}."
+        )
+    if request.n_components not in SUPPORTED_PROJECTION_COMPONENTS:
+        raise HTTPException(status_code=422, detail="n_components must be 2 or 3.")
+
+    try:
+        return await project_dataset(
+            request.model, request.reduction_method, request.n_components
+        )
+    except DatasetUnavailable as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except DeepfakeModelUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 class SilenceProbeRequest(BaseModel):

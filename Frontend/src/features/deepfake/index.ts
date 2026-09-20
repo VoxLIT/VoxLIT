@@ -9,6 +9,8 @@ export { ScoreDistribution } from "./ScoreDistribution";
 export { DetCurve } from "./DetCurve";
 export { SilenceProbeCard } from "./SilenceProbeCard";
 export { SaliencyPanel } from "./SaliencyPanel";
+export { DeepfakeEmbeddingPanel } from "./DeepfakeEmbeddingPanel";
+export { EmbeddingScatter } from "./EmbeddingScatter";
 export type {
   DeepfakeResult,
   RecordingInfo,
@@ -20,4 +22,6 @@ export type {
   ProbeVariant,
   DeepfakeSaliency,
   SaliencySegment,
+  DeepfakeEmbeddingProjection,
+  EmbeddingRecording,
 } from "./types";

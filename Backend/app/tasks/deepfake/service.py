@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Protocol
@@ -120,7 +121,7 @@ class DeepfakeModelUnavailable(RuntimeError):
 
 
 class DeepfakeAdapter(Protocol):
-    def score(self, audio_path: str | Path) -> dict: ...
+    def score(self, audio_path: str | Path, with_embedding: bool = False) -> dict: ...
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +257,48 @@ def _load_failure_message(spec: DeepfakeModelSpec, error: Exception) -> str:
     return f"Could not load {spec.model_id}: {error}"
 
 
+@contextmanager
+def _capture_head_input(head):
+    """Yield a dict that receives the vector `head` is about to classify.
+
+    The classification head's input is the representation the decision is
+    actually read from (pooled, and for the transformers checkpoints already
+    projected), so it is the natural point for an embedding view: two clips
+    that land close together here are ones the detector cannot tell apart.
+    Reading it through a forward pre-hook costs no extra pass -- it comes out
+    of the same forward pass that produces the score.
+
+    The hook only records calls made by the thread that opened it, so a
+    concurrent plain `score()` on the same shared model can never leak its
+    clip's vector into this one's. With `head=None` this is a no-op.
+    """
+    captured: dict = {}
+    if head is None:
+        yield captured
+        return
+
+    owner = threading.get_ident()
+
+    def _record(_module, args):
+        if threading.get_ident() == owner:
+            captured["vector"] = args[0].detach()
+
+    handle = head.register_forward_pre_hook(_record)
+    try:
+        yield captured
+    finally:
+        handle.remove()
+
+
+def _embedding_from_capture(captured: dict, spec: DeepfakeModelSpec) -> list[float]:
+    vector = captured.get("vector")
+    if vector is None:
+        raise DeepfakeModelUnavailable(
+            f"{spec.model_id} exposes no classification head to read an embedding from."
+        )
+    return [round(float(v), 5) for v in vector.reshape(-1).cpu().tolist()]
+
+
 class _HFAudioClassifierAdapter:
     """Wraps a standard transformers audio-classification checkpoint.
 
@@ -310,7 +353,7 @@ class _HFAudioClassifierAdapter:
         )
         self.analysis_window_seconds = _analysis_window_seconds(self.feature_extractor)
 
-    def score(self, audio_path: str | Path) -> dict:
+    def score(self, audio_path: str | Path, with_embedding: bool = False) -> dict:
         import torch
 
         waveform, sample_rate = _load_waveform(audio_path)
@@ -329,12 +372,13 @@ class _HFAudioClassifierAdapter:
         )
         inputs = {name: value.to(self.device) for name, value in inputs.items()}
 
-        with torch.inference_mode():
+        head = getattr(self.model, "classifier", None) if with_embedding else None
+        with torch.inference_mode(), _capture_head_input(head) as captured:
             logits = self.model(**inputs).logits
 
         probabilities = torch.softmax(logits, dim=-1).squeeze(0).cpu()
 
-        return {
+        result = {
             "spoof_probability": round(float(probabilities[self.spoof_index]), 6),
             "bonafide_probability": round(
                 float(probabilities[self.bonafide_index]), 6
@@ -347,6 +391,9 @@ class _HFAudioClassifierAdapter:
             "analysis_window_seconds": round(window, 2),
             "truncated": truncated,
         }
+        if with_embedding:
+            result["embedding"] = _embedding_from_capture(captured, self.spec)
+        return result
 
 
 class _XLSRMambaAdapter:
@@ -382,7 +429,7 @@ class _XLSRMambaAdapter:
             xlsr_mamba.EVAL_CUT_SAMPLES / float(spec.sampling_rate)
         )
 
-    def score(self, audio_path: str | Path) -> dict:
+    def score(self, audio_path: str | Path, with_embedding: bool = False) -> dict:
         import torch
 
         waveform, sample_rate = _load_waveform(audio_path)
@@ -394,12 +441,13 @@ class _XLSRMambaAdapter:
         prepared = self._xlsr_mamba.pad_or_tile(waveform.squeeze(0).numpy())
         batch = torch.from_numpy(prepared).float().unsqueeze(0)
 
-        with torch.inference_mode():
+        head = self.model.conformer.classifier if with_embedding else None
+        with torch.inference_mode(), _capture_head_input(head) as captured:
             logits = self.model(batch)
 
         probabilities = torch.softmax(logits, dim=-1).squeeze(0)
 
-        return {
+        result = {
             "spoof_probability": round(float(probabilities[self.spoof_index]), 6),
             "bonafide_probability": round(float(probabilities[self.bonafide_index]), 6),
             "logits": [round(v, 6) for v in logits.squeeze(0).tolist()],
@@ -410,6 +458,9 @@ class _XLSRMambaAdapter:
             "analysis_window_seconds": round(self.analysis_window_seconds, 2),
             "truncated": truncated,
         }
+        if with_embedding:
+            result["embedding"] = _embedding_from_capture(captured, self.spec)
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +513,20 @@ def run_detection(model_key: str, audio_path: str | Path) -> dict:
         "threshold_calibrated": spec.threshold_calibrated,
         "threshold_version": THRESHOLD_VERSION,
         **result,
+    }
+
+
+def run_embedding(model_key: str, audio_path: str | Path) -> dict:
+    """Score one clip and return the vector its classification head read.
+
+    One forward pass. The score comes back with it so the embedding view can
+    colour each point by the detector's own opinion without a second pass.
+    Returns {"embedding": [...], "spoof_probability": float}.
+    """
+    result = get_model(model_key).score(audio_path, with_embedding=True)
+    return {
+        "embedding": result["embedding"],
+        "spoof_probability": result["spoof_probability"],
     }
 
 
