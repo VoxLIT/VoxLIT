@@ -49,3 +49,9 @@ matplotlib
 # Downgrading to 1.0.x breaks ECAPA-TDNN.
 speechbrain==1.1.0
 pyannote.audio==3.4.0
+# Hungarian speaker mapping (optimal_mapping) + DER for task_b's perturbation
+# diffs in app/tasks/task_b/diff.py. It arrives transitively with
+# pyannote.audio, but task_b imports it directly, so it is pinned here rather
+# than left implicit. A range, not ==, so pip can still resolve whatever
+# compatible patch pyannote.audio 3.4.0 asks for.
+pyannote.metrics>=3.2.1,<4

@@ -30,6 +30,9 @@ from .dataset import RecordingInfo
 ALLOWED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac"}
 MAX_FILE_BYTES = 50 * 1024 * 1024
 UPLOAD_ID_PREFIX = "upl_"
+# Perturbed clips (Phase 2) share this directory but are a different kind of
+# thing: derived, deterministic, and never listed as "your uploads".
+PERTURBED_ID_PREFIX = "prt_"
 
 _SID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _TEMP_PREFIX = ".tmp-"
@@ -41,6 +44,10 @@ class InvalidSessionId(Exception):
 
 class UploadNotFound(ValueError):
     """Raised when an upload id is unknown or not owned by the caller's session."""
+
+
+class PerturbedNotFound(ValueError):
+    """Raised when a perturbed-clip id is unknown or not owned by the caller's session."""
 
 
 def _storage_root() -> Path:
@@ -119,11 +126,20 @@ def promote_upload(temp_path: Path, sid: str, extension: str) -> RecordingInfo:
 
 def list_uploads(sid: str) -> list[RecordingInfo]:
     """This session's uploads, newest first, so a page refresh restores the
-    list with the most recently uploaded recording at the top."""
+    list with the most recently uploaded recording at the top.
+
+    Only `upl_` entries: perturbed clips live in the same directory but are
+    derived artefacts, not things the user uploaded, and listing them here
+    would let a perturbation masquerade as a source recording.
+    """
 
     validated_sid = validate_and_canonicalize_sid(sid)
     entries = sorted(
-        _iter_upload_files(validated_sid),
+        (
+            entry
+            for entry in _iter_upload_files(validated_sid)
+            if entry.stem.startswith(UPLOAD_ID_PREFIX)
+        ),
         key=lambda entry: entry.stat().st_mtime,
         reverse=True,
     )
@@ -150,3 +166,16 @@ def resolve_upload_path(upload_id: str, sid: str) -> Path:
         if entry.stem == upload_id:
             return entry
     raise UploadNotFound(f"Unknown upload id: {upload_id}")
+
+
+def resolve_perturbed_path(perturbed_id: str, sid: str) -> Path:
+    """Resolve a perturbed-clip id to its on-disk path, with exactly the same
+    guarantees as `resolve_upload_path`: the untrusted id is compared against
+    stems discovered by listing and never joined into a path, and only the
+    caller's own session directory is scanned."""
+
+    validated_sid = validate_and_canonicalize_sid(sid)
+    for entry in _iter_upload_files(validated_sid):
+        if entry.stem == perturbed_id:
+            return entry
+    raise PerturbedNotFound(f"Unknown perturbed clip id: {perturbed_id}")

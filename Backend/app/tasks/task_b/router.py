@@ -5,16 +5,17 @@ from __future__ import annotations
 import shutil
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from app.core.redis import cache_result, get_result
 from app.services.dataset_service import media_type_for
 
-from . import uploads
+from . import diff, perturbation, uploads
 from .dataset import (
     DATASET_ID,
     DatasetUnavailable,
@@ -169,15 +170,22 @@ class RunRequest(BaseModel):
 
 
 async def _resolve_audio_source(recording_id: str, sid: str) -> Path:
-    """Route an `upl_...` upload id to this session's storage and anything
-    else to the demo dataset. Neither resolver joins the untrusted id into a
-    path -- both compare it against ids derived from a directory listing --
-    so an unknown or traversal-shaped id simply misses and 404s."""
+    """Route an `upl_...` upload id or a `prt_...` perturbed clip to this
+    session's storage, and anything else to the demo dataset. No resolver
+    joins the untrusted id into a path -- each compares it against ids derived
+    from a directory listing -- so an unknown or traversal-shaped id simply
+    misses and 404s."""
 
     if recording_id.startswith(uploads.UPLOAD_ID_PREFIX):
         try:
             return await run_in_threadpool(uploads.resolve_upload_path, recording_id, sid)
         except uploads.UploadNotFound as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    if recording_id.startswith(uploads.PERTURBED_ID_PREFIX):
+        try:
+            return await run_in_threadpool(uploads.resolve_perturbed_path, recording_id, sid)
+        except uploads.PerturbedNotFound as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
     try:
@@ -259,4 +267,110 @@ async def projection(request: Request, model: str, recording_id: str):
         "model": model,
         "recording_id": recording_id,
         "points": await run_in_threadpool(_pca),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Perturbation counterfactuals -- degrade the audio, re-diarize, diff the two
+# runs. Clustering is non-differentiable, so this is the honest way to probe
+# the pipeline's sensitivity; there is no saliency or attention to fall back on.
+# ---------------------------------------------------------------------------
+
+
+class PerturbationSpec(BaseModel):
+    type: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class PerturbationRequest(BaseModel):
+    model: str
+    recording_id: str
+    perturbation: PerturbationSpec
+
+
+@router.get("/perturbed/{perturbed_id}/audio")
+async def perturbed_audio(request: Request, perturbed_id: str):
+    """Serve a perturbed clip so the UI can play the degraded audio next to
+    the original."""
+
+    sid = _require_sid(request)
+    try:
+        path = await run_in_threadpool(uploads.resolve_perturbed_path, perturbed_id, sid)
+    except uploads.PerturbedNotFound as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return FileResponse(path, media_type="audio/wav", filename=path.name)
+
+
+@router.post("/perturbation")
+async def run_perturbation(request: Request, payload: PerturbationRequest):
+    """Perturb one recording, diarize the result through the ordinary cached
+    `/run` path, and return the diff against the original run.
+
+    Every layer here is content-addressed, which is what makes a repeat of the
+    same perturbation instant rather than another few minutes of CPU: the
+    perturbed file's id is derived from the source hash plus the canonical
+    params (so it is not even rewritten), its diarization is cached under its
+    own content hash, and the delta itself is cached under the pair.
+    """
+
+    sid = _require_sid(request)
+    try:
+        get_model_spec(payload.model)
+    except UnsupportedDiarizationModel as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    source_path = await _resolve_audio_source(payload.recording_id, sid)
+    source_hash = await run_in_threadpool(file_sha256, source_path)
+
+    try:
+        perturbed_id, perturbed_path, normalized_params = await run_in_threadpool(
+            perturbation.perturb_to_session,
+            source_path,
+            sid,
+            source_hash,
+            payload.perturbation.type,
+            payload.perturbation.params,
+        )
+    except uploads.InvalidSessionId as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ValueError as error:
+        # Unknown type, bad params, a no-op transform, or invalid output --
+        # all of them are "your request could not be carried out", not an
+        # infrastructure failure.
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    perturbed_hash = await run_in_threadpool(file_sha256, perturbed_path)
+    delta_cache_key = f"diar-delta:{payload.model}"
+    delta_cache_hash = f"{source_hash}:{perturbed_hash}"
+
+    cached = await get_result(delta_cache_key, delta_cache_hash)
+    if cached is not None:
+        return {**cached, "cached": True}
+
+    original_result = await _get_or_compute(payload.model, payload.recording_id, sid)
+    perturbed_result = await _get_or_compute(payload.model, perturbed_id, sid)
+    delta = await run_in_threadpool(diff.compare_runs, original_result, perturbed_result)
+
+    result = {
+        "model": payload.model,
+        "perturbation": {"type": payload.perturbation.type, "params": normalized_params},
+        "original": _run_summary(original_result, payload.recording_id),
+        "perturbed": _run_summary(perturbed_result, perturbed_id),
+        "delta": delta,
+    }
+    await cache_result(delta_cache_key, delta_cache_hash, result, ttl=CACHE_TTL_SECONDS)
+    return {**result, "cached": False}
+
+
+def _run_summary(result: dict, recording_id: str) -> dict:
+    """The parts of a diarization run the comparison view needs. Embeddings
+    are deliberately dropped -- a long meeting carries N x 256 floats that the
+    stacked timelines never read, and the delta payload is already cached."""
+
+    return {
+        "recording_id": recording_id,
+        "duration": result["duration"],
+        "num_speakers": result["num_speakers"],
+        "speakers": result["speakers"],
+        "segments": result["segments"],
     }

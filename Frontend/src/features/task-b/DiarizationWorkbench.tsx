@@ -9,8 +9,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DiarizationTimeline } from "./DiarizationTimeline";
 import { SimilarityMatrix } from "./SimilarityMatrix";
 import { EmbeddingScatter } from "./EmbeddingScatter";
+import { DeltaSummaryCard } from "./DeltaSummaryCard";
+import { PerturbationControls, noisePercentToLevel } from "./PerturbationControls";
+import { StackedTimelines } from "./StackedTimelines";
 import {
   DiarizationResult,
+  PerturbationResult,
+  PerturbationType,
   ProjectionResult,
   RecordingInfo,
 } from "./types";
@@ -42,6 +47,28 @@ export const DiarizationWorkbench = ({ model, modelLabel }: DiarizationWorkbench
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+
+  // --- Perturbation counterfactual -------------------------------------
+  const [perturbationType, setPerturbationType] = useState<PerturbationType>("noise");
+  const [noisePercent, setNoisePercent] = useState(4);
+  const [maskRange, setMaskRange] = useState<[number, number]>([20, 40]);
+  const [perturbation, setPerturbation] = useState<PerturbationResult | null>(null);
+  const [isPerturbing, setIsPerturbing] = useState(false);
+  const [perturbationError, setPerturbationError] = useState<string | null>(null);
+  // A perturbed run can take minutes, so an abandoned one must not land on
+  // top of a newer selection. Same guard the verification workbench uses.
+  const perturbationAbortRef = useRef<AbortController | null>(null);
+  const perturbedAudioRef = useRef<HTMLAudioElement>(null);
+
+  /** Anything that changes which audio is under test invalidates a perturbed
+   *  comparison, so clear it rather than leave a result pointing at a
+   *  recording the user has moved away from. */
+  const resetPerturbation = () => {
+    perturbationAbortRef.current?.abort();
+    perturbationAbortRef.current = null;
+    setPerturbation(null);
+    setPerturbationError(null);
+  };
 
   // Queue for "play segment A, then segment B" from the similarity matrix.
   const playQueueRef = useRef<{ start: number; end: number }[]>([]);
@@ -125,6 +152,7 @@ export const DiarizationWorkbench = ({ model, modelLabel }: DiarizationWorkbench
       setResult(null);
       setProjection(null);
       setSelectedId(null);
+      resetPerturbation();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Upload failed.");
     } finally {
@@ -168,6 +196,63 @@ export const DiarizationWorkbench = ({ model, modelLabel }: DiarizationWorkbench
       setError(caught instanceof Error ? caught.message : "Diarization failed.");
     } finally {
       setIsRunning(false);
+    }
+  };
+
+  const runPerturbation = async () => {
+    if (!selectedRecordingId || !model) return;
+
+    perturbationAbortRef.current?.abort();
+    const controller = new AbortController();
+    perturbationAbortRef.current = controller;
+
+    setIsPerturbing(true);
+    setPerturbationError(null);
+    setPerturbation(null);
+
+    const params =
+      perturbationType === "noise"
+        ? { noise_level: noisePercentToLevel(noisePercent) }
+        : { mask_start_percent: maskRange[0], mask_end_percent: maskRange[1] };
+
+    try {
+      const response = await fetch(`${API_BASE}/tasks/task-b/perturbation`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          recording_id: selectedRecordingId,
+          perturbation: { type: perturbationType, params },
+        }),
+        signal: controller.signal,
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || `Perturbation failed (${response.status})`);
+      }
+      setPerturbation(payload as PerturbationResult);
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      setPerturbationError(caught instanceof Error ? caught.message : "Perturbation failed.");
+    } finally {
+      setIsPerturbing(false);
+      if (perturbationAbortRef.current === controller) {
+        perturbationAbortRef.current = null;
+      }
+    }
+  };
+
+  /** Seek the perturbed clip rather than the original — the two runs have
+   *  their own audio, and clicking a perturbed segment should play what that
+   *  run actually heard. */
+  const seekPerturbedSegment = (segmentId: string) => {
+    setSelectedId(segmentId);
+    const segment = perturbation?.perturbed.segments.find((s) => s.id === segmentId);
+    const audio = perturbedAudioRef.current;
+    if (segment && audio) {
+      audio.currentTime = segment.start;
+      audio.play().catch(() => undefined);
     }
   };
 
@@ -221,6 +306,7 @@ export const DiarizationWorkbench = ({ model, modelLabel }: DiarizationWorkbench
                   setProjection(null);
                   setSelectedId(null);
                   setError(null);
+                  resetPerturbation();
                 }}
               >
                 <option value="">Select a recording…</option>
@@ -363,6 +449,88 @@ export const DiarizationWorkbench = ({ model, modelLabel }: DiarizationWorkbench
                 speakers={result.speakers}
                 onPlayPair={playPair}
               />
+            </CardContent>
+          </Card>
+        )}
+
+        {result && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">
+                5. Perturbation counterfactual{" "}
+                <span className="font-normal text-muted-foreground">
+                  — degrade the audio, re-diarize, and see what the pipeline
+                  changes its mind about
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <PerturbationControls
+                activeType={perturbationType}
+                onActiveTypeChange={(type) => {
+                  setPerturbationType(type);
+                  resetPerturbation();
+                }}
+                noisePercent={noisePercent}
+                onNoisePercentChange={(value) => {
+                  setNoisePercent(value);
+                  resetPerturbation();
+                }}
+                maskRange={maskRange}
+                onMaskRangeChange={(value) => {
+                  setMaskRange(value);
+                  resetPerturbation();
+                }}
+                onRun={runPerturbation}
+                isRunning={isPerturbing}
+                disabled={!selectedRecordingId || isRunning}
+                disabledReason={
+                  isRunning ? "Waiting for the current diarization to finish." : null
+                }
+              />
+
+              {perturbationError && (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Perturbation could not be completed</AlertTitle>
+                  <AlertDescription>{perturbationError}</AlertDescription>
+                </Alert>
+              )}
+
+              {perturbation && (
+                <div className="space-y-4">
+                  <DeltaSummaryCard
+                    delta={perturbation.delta}
+                    perturbation={perturbation.perturbation}
+                    cached={perturbation.cached}
+                  />
+
+                  <StackedTimelines
+                    original={perturbation.original}
+                    perturbed={perturbation.perturbed}
+                    delta={perturbation.delta}
+                    hoveredId={hoveredId}
+                    selectedId={selectedId}
+                    onHover={setHoveredId}
+                    onSelectOriginal={seekToSegment}
+                    onSelectPerturbed={seekPerturbedSegment}
+                  />
+
+                  <div className="space-y-1">
+                    <div className="text-xs text-muted-foreground">
+                      Perturbed audio — listen to what the second run actually heard
+                    </div>
+                    <audio
+                      ref={perturbedAudioRef}
+                      controls
+                      className="w-full"
+                      src={`${API_BASE}/tasks/task-b/perturbed/${encodeURIComponent(
+                        perturbation.perturbed.recording_id
+                      )}/audio`}
+                    />
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
