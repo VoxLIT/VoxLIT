@@ -4,3 +4,5 @@ CLAUDE.md
 
 .env
 
+* [0-9].*
+*.tsbuildinfo
