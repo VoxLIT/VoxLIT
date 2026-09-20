@@ -3,6 +3,7 @@ import { Toolbar } from "./Toolbar";
 import { ExplainabilityPanel } from "./ExplainabilityPanel";
 import { PlaceholderExplainability } from "./PlaceholderExplainability";
 import { EmbeddingPanel } from "../panels/EmbeddingPanel";
+import { DeepfakeEmbeddingPanel } from "@/features/deepfake";
 import { AudioDatasetPanel } from "../panels/AudioDatasetPanel";
 import { DatapointEditorPanel } from "../panels/DatapointEditorPanel";
 import { EmbeddingProvider } from "../../contexts/EmbeddingContext";
@@ -859,6 +860,15 @@ export const TaskWorkbench = ({ task }: TaskWorkbenchProps) => {
           <PanelGroup direction="horizontal" className="h-full">
             {/* Left Panel: Embeddings & Scalar Plots */}
             <Panel defaultSize={25} minSize={20}>
+              {task.id === 'deepfake' ? (
+                <DeepfakeEmbeddingPanel
+                  model={model}
+                  modelLabel={getModelLabel(task, model)}
+                  availableFiles={availableFiles}
+                  selectedFile={selectedFile}
+                  onFileSelect={handleFileSelection}
+                />
+              ) : (
               <EmbeddingPanel
                 key={task.id === 'verification' ? effectiveDataset : undefined}
                 model={model}
@@ -876,6 +886,7 @@ export const TaskWorkbench = ({ task }: TaskWorkbenchProps) => {
                 onPairSelectionChange={setPairSelectionLabels}
                 onReproject={reprojectFn}
               />
+              )}
             </Panel>
 
             <PanelResizeHandle className="w-1 bg-border hover:bg-primary/20 transition-colors" />

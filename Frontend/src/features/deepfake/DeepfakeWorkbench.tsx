@@ -10,13 +10,14 @@ import { SaliencyPanel } from "./SaliencyPanel";
 import { SilenceProbeCard } from "./SilenceProbeCard";
 import { ScoreBar } from "./ScoreBar";
 import { DeepfakeResult, RecordingInfo } from "./types";
+import type { WorkbenchCenterProps } from "@/tasks/types";
 
-interface DeepfakeWorkbenchProps {
-  model: string;
-  modelLabel: string;
-}
+type DeepfakeWorkbenchProps = Pick<
+  WorkbenchCenterProps,
+  "model" | "modelLabel" | "selectedFile" | "onFileSelect"
+>;
 
-export const DeepfakeWorkbench = ({ model, modelLabel }: DeepfakeWorkbenchProps) => {
+export const DeepfakeWorkbench = ({ model, modelLabel, selectedFile, onFileSelect }: DeepfakeWorkbenchProps) => {
   const [recordings, setRecordings] = useState<RecordingInfo[]>([]);
   const [selectedRecordingId, setSelectedRecordingId] = useState<string>("");
   const [result, setResult] = useState<DeepfakeResult | null>(null);
@@ -38,6 +39,35 @@ export const DeepfakeWorkbench = ({ model, modelLabel }: DeepfakeWorkbenchProps)
     };
     loadRecordings();
   }, []);
+
+  // Follow the shared selection, so a point clicked in the Audio Embeddings
+  // panel (or a row in the Audio Dataset table) selects that recording here too.
+  const sharedRecordingId = selectedFile?.file_id;
+  useEffect(() => {
+    if (!sharedRecordingId || sharedRecordingId === selectedRecordingId) return;
+    if (!recordings.some((recording) => recording.recording_id === sharedRecordingId)) return;
+    setSelectedRecordingId(sharedRecordingId);
+    setResult(null);
+    setError(null);
+    // Reacts to a change of the SHARED selection only: choosing "Select a
+    // recording…" in the picker must not snap back to the shared one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedRecordingId, recordings]);
+
+  const handleRecordingChange = (recordingId: string) => {
+    setSelectedRecordingId(recordingId);
+    setResult(null);
+    setError(null);
+    const recording = recordings.find((candidate) => candidate.recording_id === recordingId);
+    if (recording) {
+      onFileSelect({
+        file_id: recording.recording_id,
+        filename: recording.display_filename,
+        file_path: recording.display_filename,
+        message: "Selected from dataset",
+      });
+    }
+  };
 
   const runDetection = async () => {
     if (!selectedRecordingId || !model) return;
@@ -101,11 +131,7 @@ export const DeepfakeWorkbench = ({ model, modelLabel }: DeepfakeWorkbenchProps)
               <select
                 className="h-9 rounded-md border bg-background px-2 text-sm"
                 value={selectedRecordingId}
-                onChange={(event) => {
-                  setSelectedRecordingId(event.target.value);
-                  setResult(null);
-                  setError(null);
-                }}
+                onChange={(event) => handleRecordingChange(event.target.value)}
               >
                 <option value="">Select a recording…</option>
                 {recordings.map((recording) => (
