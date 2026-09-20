@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AudioLines, Loader2, Play } from "lucide-react";
+import { AudioLines, Loader2, Play, Upload } from "lucide-react";
 import { API_BASE } from "@/lib/api";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
@@ -20,8 +20,20 @@ interface DiarizationWorkbenchProps {
   modelLabel: string;
 }
 
+/** Session uploads and demo recordings differ only by id prefix; the audio
+ *  endpoint differs, everything downstream does not. */
+const UPLOAD_ID_PREFIX = "upl_";
+
+const audioUrlFor = (recordingId: string): string =>
+  recordingId.startsWith(UPLOAD_ID_PREFIX)
+    ? `${API_BASE}/tasks/task-b/uploads/${encodeURIComponent(recordingId)}/audio`
+    : `${API_BASE}/tasks/task-b/dataset/recordings/${encodeURIComponent(recordingId)}/audio`;
+
 export const DiarizationWorkbench = ({ model, modelLabel }: DiarizationWorkbenchProps) => {
   const [recordings, setRecordings] = useState<RecordingInfo[]>([]);
+  const [uploads, setUploads] = useState<RecordingInfo[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const [selectedRecordingId, setSelectedRecordingId] = useState<string>("");
   const [result, setResult] = useState<DiarizationResult | null>(null);
   const [projection, setProjection] = useState<ProjectionResult | null>(null);
@@ -72,8 +84,53 @@ export const DiarizationWorkbench = ({ model, modelLabel }: DiarizationWorkbench
         setError(caught instanceof Error ? caught.message : "Could not list recordings.");
       }
     };
+    const loadUploads = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/tasks/task-b/uploads`, {
+          credentials: "include",
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "Could not list your uploads.");
+        setUploads(payload.uploads as RecordingInfo[]);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not list your uploads.");
+      }
+    };
     loadRecordings();
+    // Uploads live for the session, so a refresh has to restore them.
+    loadUploads();
   }, []);
+
+  const uploadAudio = async (file: File) => {
+    setIsUploading(true);
+    setError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch(`${API_BASE}/tasks/task-b/uploads`, {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || `Upload failed (${response.status})`);
+      }
+      const uploaded = payload as RecordingInfo;
+      // Newest first, matching the order the backend lists them in.
+      setUploads((current) => [uploaded, ...current]);
+      // Select it right away — uploading it is the intent to diarize it.
+      setSelectedRecordingId(uploaded.recording_id);
+      setResult(null);
+      setProjection(null);
+      setSelectedId(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Upload failed.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const runDiarization = async () => {
     if (!selectedRecordingId || !model) return;
@@ -124,9 +181,7 @@ export const DiarizationWorkbench = ({ model, modelLabel }: DiarizationWorkbench
     }
   };
 
-  const audioUrl = selectedRecordingId
-    ? `${API_BASE}/tasks/task-b/dataset/recordings/${selectedRecordingId}/audio`
-    : undefined;
+  const audioUrl = selectedRecordingId ? audioUrlFor(selectedRecordingId) : undefined;
 
   return (
     <div className="h-full overflow-y-auto bg-background p-4 scrollbar-thin">
@@ -169,12 +224,50 @@ export const DiarizationWorkbench = ({ model, modelLabel }: DiarizationWorkbench
                 }}
               >
                 <option value="">Select a recording…</option>
-                {recordings.map((recording) => (
-                  <option key={recording.recording_id} value={recording.recording_id}>
-                    {recording.display_filename}
-                  </option>
-                ))}
+                <optgroup label="AMI meetings">
+                  {recordings.map((recording) => (
+                    <option key={recording.recording_id} value={recording.recording_id}>
+                      {recording.display_filename}
+                    </option>
+                  ))}
+                </optgroup>
+                {uploads.length > 0 && (
+                  <optgroup label="Your uploads">
+                    {uploads.map((upload) => (
+                      <option key={upload.recording_id} value={upload.recording_id}>
+                        {upload.display_filename}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
+              <Button
+                variant="outline"
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={isUploading || isRunning}
+              >
+                {isUploading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Uploading…
+                  </>
+                ) : (
+                  <>
+                    <Upload className="mr-2 h-4 w-4" /> Upload audio
+                  </>
+                )}
+              </Button>
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept="audio/wav,audio/mpeg,audio/mp4,audio/flac,.wav,.mp3,.m4a,.flac"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) uploadAudio(file);
+                  // Reset so re-picking the same file fires onChange again.
+                  event.target.value = "";
+                }}
+              />
               <Button onClick={runDiarization} disabled={!selectedRecordingId || isRunning}>
                 {isRunning ? (
                   <>
@@ -188,6 +281,11 @@ export const DiarizationWorkbench = ({ model, modelLabel }: DiarizationWorkbench
                 )}
               </Button>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Upload your own WAV, MP3, M4A or FLAC (max 50 MB). Uploads are private to
+              your session; a first run costs minutes of CPU, but re-running the same
+              audio is instant.
+            </p>
             {audioUrl && (
               <audio
                 ref={audioRef}

@@ -1,5 +1,8 @@
 /** Response shapes from /tasks/task-b (see Backend/app/tasks/task_b/router.py). */
 
+/** Demo recordings and session uploads share this shape deliberately — they
+ *  differ only in the `recording_id` prefix (`rec_` for AMI, `upl_` for an
+ *  upload), which selects the audio endpoint and nothing else. */
 export interface RecordingInfo {
   recording_id: string;
   display_filename: string;
