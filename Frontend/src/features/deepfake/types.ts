@@ -179,3 +179,32 @@ export interface DeepfakeSaliency {
 
   cached: boolean;
 }
+
+/** One point of the embedding view. Carries the detector's own score, never
+ *  the dataset's bona fide/spoof label. */
+export interface EmbeddingRecording {
+  recording_id: string;
+  display_filename: string;
+  spoof_probability: number;
+  /** The model's decision at its shipped threshold. */
+  decision: "spoof" | "bonafide";
+}
+
+/** Response shape of POST /tasks/deepfake/embeddings — Feature 4.
+ *  `coordinates` is index-aligned with `recordings`. */
+export interface DeepfakeEmbeddingProjection {
+  model: string;
+  model_label: string;
+  reduction_method: string;
+  /** Differs from `reduction_method` only when the reducer had to fall back. */
+  reduction_method_used: string;
+  n_components: 2 | 3;
+  effective_components: number;
+  /** Width of the vector the detector's classification head reads. */
+  embedding_dimension: number;
+  total_recordings: number;
+  threshold: number;
+  threshold_calibrated: boolean;
+  recordings: EmbeddingRecording[];
+  coordinates: number[][];
+}
