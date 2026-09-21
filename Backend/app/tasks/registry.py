@@ -38,7 +38,7 @@ TASKS: dict[str, dict] = {
     "task-b": {
         "name": "Speaker Diarization",
         "status": "active",
-        "models": ["pyannote-3.1"],
+        "models": ["pyannote-3.1", "reverb-v1", "reverb-v2"],
         "datasets": ["ami-subset"],
     },
     "deepfake": {

@@ -13,6 +13,7 @@ import { DeltaSummaryCard } from "./DeltaSummaryCard";
 import { PerturbationControls, noisePercentToLevel } from "./PerturbationControls";
 import { StackedTimelines } from "./StackedTimelines";
 import {
+  DiarizationModelInfo,
   DiarizationResult,
   PerturbationResult,
   PerturbationType,
@@ -37,6 +38,7 @@ const audioUrlFor = (recordingId: string): string =>
 export const DiarizationWorkbench = ({ model, modelLabel }: DiarizationWorkbenchProps) => {
   const [recordings, setRecordings] = useState<RecordingInfo[]>([]);
   const [uploads, setUploads] = useState<RecordingInfo[]>([]);
+  const [models, setModels] = useState<DiarizationModelInfo[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const [selectedRecordingId, setSelectedRecordingId] = useState<string>("");
@@ -123,9 +125,23 @@ export const DiarizationWorkbench = ({ model, modelLabel }: DiarizationWorkbench
         setError(caught instanceof Error ? caught.message : "Could not list your uploads.");
       }
     };
+    const loadModels = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/tasks/task-b/models`, {
+          credentials: "include",
+        });
+        const payload = await response.json();
+        if (!response.ok) return;
+        setModels(payload.models as DiarizationModelInfo[]);
+      } catch {
+        // The note is explanatory only -- losing it must not surface an error
+        // banner over a workbench that is otherwise working.
+      }
+    };
     loadRecordings();
     // Uploads live for the session, so a refresh has to restore them.
     loadUploads();
+    loadModels();
   }, []);
 
   const uploadAudio = async (file: File) => {
@@ -198,6 +214,34 @@ export const DiarizationWorkbench = ({ model, modelLabel }: DiarizationWorkbench
       setIsRunning(false);
     }
   };
+
+  /** A model switch invalidates everything on screen: the timeline, the
+   *  projection and the perturbation delta all belong to the model that
+   *  produced them, and leaving them up would label one model's result with
+   *  another's name. Clear them, then re-run — `/run` is cache-through, so a
+   *  model already computed for this recording comes back immediately, and an
+   *  uncached one costs the same whether a button or this effect starts it.
+   *  Uploads and the recording list are deliberately untouched: which audio is
+   *  selected does not change when the model does. */
+  const isFirstModelRender = useRef(true);
+  useEffect(() => {
+    if (isFirstModelRender.current) {
+      isFirstModelRender.current = false;
+      return;
+    }
+    setResult(null);
+    setProjection(null);
+    setSelectedId(null);
+    resetPerturbation();
+    if (selectedRecordingId) runDiarization();
+    // Only a model change triggers this; runDiarization reads the latest
+    // selection from the render it was created in.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model]);
+
+  /** Empty until /models resolves, and for a key the backend does not know —
+   *  a missing note renders nothing rather than breaking the header. */
+  const glassBoxNote = models.find((m) => m.key === model)?.glass_box_note ?? "";
 
   const runPerturbation = async () => {
     if (!selectedRecordingId || !model) return;
@@ -281,6 +325,9 @@ export const DiarizationWorkbench = ({ model, modelLabel }: DiarizationWorkbench
             Who spoke when — with the pipeline's own internals exposed: per-segment
             confidence from the clustering's embedding space, hatched where uncertain.
           </p>
+          {glassBoxNote && (
+            <p className="mt-1 text-[10px] text-muted-foreground">{glassBoxNote}</p>
+          )}
         </div>
 
         {error && (

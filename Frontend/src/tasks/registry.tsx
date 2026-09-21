@@ -106,9 +106,15 @@ export const TASKS: TaskDefinition[] = [
     route: "/tasks/task-b",
     name: "Speaker Diarization",
     shortDescription:
-      "Glass-box diarization with pyannote 3.1: per-segment confidence from the clustering's own embedding space, uncertainty shading, and an embedding explorer.",
+      "Glass-box diarization across three pipelines: per-segment confidence from the clustering's own embedding space, uncertainty shading, and an embedding explorer.",
     status: "active",
-    models: [{ id: "pyannote-3.1", label: "pyannote 3.1", available: true }],
+    // All three share one WeSpeaker embedding space and differ in segmentation
+    // only, so confidence and the similarity matrix compare like for like.
+    models: [
+      { id: "pyannote-3.1", label: "pyannote 3.1", available: true },
+      { id: "reverb-v1", label: "Rev reverb v1", available: true },
+      { id: "reverb-v2", label: "Rev reverb v2", available: true },
+    ],
     defaultModel: "pyannote-3.1",
     datasets: [{ id: "ami-subset", label: "AMI Meetings (3-file subset)", available: false }],
     defaultDataset: null,
