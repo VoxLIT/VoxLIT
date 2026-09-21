@@ -1,12 +1,11 @@
 import { useState, useRef, useEffect, ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { AudioPlayer } from "../audio/AudioPlayer";
 import { WaveformViewer } from "../audio/WaveformViewer";
-import { Play, Pause, RotateCcw, Trash2, Plus, HelpCircle } from "lucide-react";
+import { HelpCircle } from "lucide-react";
 import WaveSurfer from "wavesurfer.js";
 import { API_BASE } from '@/lib/api';
 import { isDeepfakeDemoDataset } from '@/tasks/registry';
@@ -264,18 +263,21 @@ export const DatapointEditorPanel = ({
         </div>
 
       <div className="flex-1 min-h-0 p-3 overflow-y-auto space-y-3 scrollbar-thin">
-        {/* Sample Info - Top */}
+        {/* Predictions Section - Top (task-specific, from registry slot) */}
+        {renderPredictionResults?.(showPerturbed)}
+
+        {/* Audio Player & Waveform */}
         <Card>
           <CardHeader className="bg-panel-header">
             <div className="flex items-center justify-between">
               <CardTitle className="text-xs flex items-center gap-1.5">
-                Sample Info
+                Audio Playback
                 <Tooltip>
                   <TooltipTrigger>
                     <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
                   </TooltipTrigger>
                   <TooltipContent>
-                    Detailed information about the selected audio sample
+                    Interactive audio player with waveform visualization
                   </TooltipContent>
                 </Tooltip>
               </CardTitle>
@@ -323,98 +325,35 @@ export const DatapointEditorPanel = ({
               )}
             </div>
           </CardHeader>
-          <CardContent className="space-y-1.5">
+          <CardContent className="space-y-2.5">
+            <div className="text-xs flex items-center justify-between gap-2 pb-1 border-b border-border/50">
+              <span className="truncate">
+                <span className="text-muted-foreground font-medium">File: </span>
+                <span className="font-mono text-foreground">{currentFileInfo?.filename || "No file selected"}</span>
+              </span>
+              {showPerturbed && (
+                <Badge variant="secondary" className="ml-2 shrink-0 text-[9px] bg-blue-100 text-blue-700 border-blue-200">
+                  Perturbed
+                </Badge>
+              )}
+            </div>
             {localPreview && (
-              <div className="text-xs-tight">
-                <span className="text-gray-500">Role:</span>
-                <span className="ml-2 text-gray-700">
+              <div className="text-xs text-muted-foreground">
+                <span className="font-medium">Role: </span>
+                <span className="text-foreground">
                   {localPreview.role === "enrollment" ? "Enrollment reference" : "Probe"}
                 </span>
               </div>
             )}
-            <div className="text-xs-tight">
-              <span className="text-gray-500">File:</span>
-              <span className="ml-2 font-mono text-gray-700">{currentFileInfo?.filename || "No file selected"}</span>
-              {showPerturbed && (
-                <Badge variant="secondary" className="ml-2 text-[9px] bg-blue-100 text-blue-700 border-blue-200">P</Badge>
-              )}
-            </div>
-            <div className="text-xs-tight">
-              <span className="text-gray-500">Duration:</span>
-              <span className="ml-2 text-gray-700">
-                {currentFileInfo?.duration
-                  ? `${currentFileInfo.duration.toFixed(1)}s`
-                  : audioMetadata.duration
-                  ? `${audioMetadata.duration.toFixed(1)}s`
-                  : !localPreview && isVerificationRecordingSelected && !verificationRecording ? "Not available" : "Loading..."}
-              </span>
-            </div>
-            <div className="text-xs-tight">
-              <span className="text-gray-500">Sample Rate:</span>
-              <span className="ml-2 text-gray-700">
-                {currentFileInfo?.sample_rate
-                  ? `${(currentFileInfo.sample_rate / 1000).toFixed(1)}kHz`
-                  : audioMetadata.sampleRate
-                  ? `${(audioMetadata.sampleRate / 1000).toFixed(1)}kHz`
-                  : !localPreview && isVerificationRecordingSelected && !verificationRecording ? "Not available" : "Loading..."}
-              </span>
-            </div>
-            {currentFileInfo?.extension && (
-              <div className="text-xs-tight">
-                <span className="text-gray-500">Extension:</span>
-                <span className="ml-2 text-gray-700">{currentFileInfo.extension}</span>
-              </div>
-            )}
-            {currentFileInfo?.size && (
-              <div className="text-xs-tight">
-                <span className="text-gray-500">Size:</span>
-                <span className="ml-2 text-gray-700">{(currentFileInfo.size / 1024 / 1024).toFixed(2)} MB</span>
-              </div>
-            )}
             {showPerturbed && perturbationResult?.applied_perturbations && (
-              <div className="text-xs-tight">
-                <span className="text-gray-500">Applied:</span>
-                <div className="ml-2 mt-1 space-y-1">
-                  {perturbationResult.applied_perturbations.map((pert, idx) => (
-                    <Badge key={idx} variant="outline" className="text-[9px] mr-1 border-blue-300 text-blue-700">
-                      {pert.type.replace('_', ' ')}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-            {showPerturbed && perturbationResult?.filename && predictionMap && (
-              <div className="text-xs-tight mt-2">
-                <span className="text-gray-500">Perturbed Prediction:</span>
-                <div className="ml-2 mt-1">
-                  <Badge variant="secondary" className="text-[10px] bg-blue-100 text-blue-700 border-blue-200">
-                    {predictionMap[perturbationResult.filename] || "Loading..."}
+              <div className="flex flex-wrap gap-1">
+                {perturbationResult.applied_perturbations.map((pert, idx) => (
+                  <Badge key={idx} variant="outline" className="text-[9px] border-blue-300 text-blue-700">
+                    {pert.type.replace('_', ' ')}
                   </Badge>
-                </div>
+                ))}
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Predictions Section - Middle (task-specific, from registry slot) */}
-        {renderPredictionResults?.(showPerturbed)}
-
-        {/* Audio Player & Waveform - Bottom */}
-        <Card>
-          <CardHeader className="bg-panel-header">
-            <CardTitle className="text-xs flex items-center gap-1.5">
-              Audio Playback
-              <Tooltip>
-                <TooltipTrigger>
-                  <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
-                </TooltipTrigger>
-                <TooltipContent>
-                  Interactive audio player with waveform visualization
-                </TooltipContent>
-              </Tooltip>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2.5">
             <WaveformViewer
               audioUrl={audioUrl}
               isPlaying={isPlaying}

@@ -671,34 +671,49 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
     // Create marker sizes based on selection
     const markerSizes = text.map(filename => {
       if (isExternal) {
-        return externalSelectedLabels?.includes(filename) ? 12 : 8;
+        return externalSelectedLabels?.includes(filename) ? 13 : 7.5;
       }
-      if (selectedFile === filename) return 12; // Currently selected file (medium-large)
+      if (selectedFile === filename) return 13; // Currently selected file (medium-large)
       if (selectedByAngle.includes(filename)) return 8; // Angle range selected (medium)
       return 6; // Default (smaller)
     });
 
-    // Create marker colors based on selection. Cluster-focus dimming is
-    // deliberately NOT applied here -- it's applied imperatively via
-    // Plotly.restyle() in a separate effect below, so that toggling focus
-    // never changes this useMemo's output reference (see focusStyles/the
-    // restyle effect further down).
+    // Create marker colors based on selection. Selected points preserve their
+    // cluster color so they clearly belong to their cluster rather than appearing as a new cluster.
     const markerColors = text.map((filename, index) => {
       if (isExternal) {
-        return externalSelectedLabels?.includes(filename) ? '#FFD700' : externalData![index].color;
+        return externalData![index].color;
       }
-      if (selectedFile === filename) return '#FFD700'; // Gold for selected file
+      if (selectedFile === filename) return colors[index] || '#3b82f6';
       if (selectedByAngle.includes(filename)) return '#ef4444'; // Red for angle selected
       return '#3b82f6'; // Blue for all other points
     });
 
-    // Create marker opacities based on selection
+    // Create marker line widths and colors (black outline for selected points)
+    const markerLineWidths = text.map(filename => {
+      if (isExternal) {
+        return externalSelectedLabels?.includes(filename) ? 2.5 : 0;
+      }
+      if (selectedFile === filename) return 2.5;
+      return 0;
+    });
+
+    const markerLineColors = text.map(filename => {
+      if (isExternal) {
+        return externalSelectedLabels?.includes(filename) ? '#000000' : 'transparent';
+      }
+      if (selectedFile === filename) return '#000000';
+      return 'transparent';
+    });
+
+    // Create marker opacities based on selection (selected point is 1.0, unselected points dimmed to 0.7 so selected is brighter)
     const hasSelection = isExternal
       ? (externalSelectedLabels?.length ?? 0) > 0
       : selectedFile || selectedByAngle.length > 0;
     const markerOpacities = text.map((filename, index) => {
       if (isExternal) {
-        return externalSelectedLabels?.includes(filename) ? 1.0 : 0.85;
+        if (externalSelectedLabels?.includes(filename)) return 1.0;
+        return hasSelection ? 0.7 : 0.85;
       }
       if (!hasSelection) return 0.8; // Default opacity when no selection
       if (selectedFile === filename) return 1.0; // Full opacity for selected file
@@ -739,9 +754,12 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
         size: markerSizes,
         color: markerColors,
         showscale: false,
-        line: {
-          width: 0, // Remove marker outlines
+        line: is3D ? {
+          width: 0,
           color: 'transparent'
+        } : {
+          width: markerLineWidths,
+          color: markerLineColors
         },
         opacity: markerOpacities // Use dynamic opacity array
       },
@@ -820,6 +838,42 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
       }
     }
 
+    // In 3D, scatter3d requires scalar marker.line.width, so render a dedicated highlight trace for selected points
+    if (is3D) {
+      const selectedIndices = text
+        .map((filename, index) => {
+          const isSelected = isExternal
+            ? externalSelectedLabels?.includes(filename)
+            : selectedFile === filename;
+          return isSelected ? index : -1;
+        })
+        .filter(idx => idx !== -1);
+
+      if (selectedIndices.length > 0) {
+        const highlightTrace: any = {
+          x: selectedIndices.map(i => x[i]),
+          y: selectedIndices.map(i => y[i]),
+          z: selectedIndices.map(i => z ? z[i] : 0),
+          mode: 'markers',
+          type: 'scatter3d',
+          marker: {
+            size: 13,
+            color: selectedIndices.map(i => isExternal ? externalData![i].color : (colors[i] || '#3b82f6')),
+            line: {
+              width: 3,
+              color: '#000000',
+            },
+            opacity: 1.0,
+          },
+          text: selectedIndices.map(i => hoverText[i]),
+          hovertemplate: '%{text}<extra></extra>',
+          showlegend: false,
+          name: 'Selected Point',
+        };
+        result.push(highlightTrace);
+      }
+    }
+
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isExternal, externalData, externalSelectedLabels, embeddingData, is3D, selectedFile, selectedByAngle, selectedPlane, angleMin, angleMax]);
@@ -834,15 +888,16 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
   // changes `traces`' own output reference -- applied imperatively via
   // Plotly.restyle() below instead of by feeding a new `data` prop into
   // <Plot>. Priority matches the pre-existing selection rule: an
-  // individually/pair-selected point always stays gold and fully visible;
-  // the focused cluster's own points keep their normal color; every other
-  // cluster's points are lightened toward white. Index-aligned with
+  // individually/pair-selected point retains its cluster color with bold outline
+  // and full visibility; the focused cluster's own points keep their normal color;
+  // every other cluster's points are lightened toward white. Index-aligned with
   // `externalData` directly (not `text`/`getPlotData()`), since the main
   // trace's point order for isExternal is exactly `externalData`'s order.
   const focusStyles = useMemo(() => {
     if (!isExternal || !externalData) return null;
+    const hasSelection = (externalSelectedLabels?.length ?? 0) > 0;
     const colors = externalData.map((point) => {
-      if (externalSelectedLabels?.includes(point.label)) return '#FFD700';
+      if (externalSelectedLabels?.includes(point.label)) return point.color;
       if (focusedClusterId && point.clusterId !== focusedClusterId) {
         return mixWithWhite(point.color, 0.7);
       }
@@ -851,7 +906,7 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
     const opacities = externalData.map((point) => {
       if (externalSelectedLabels?.includes(point.label)) return 1.0;
       if (focusedClusterId && point.clusterId !== focusedClusterId) return 0.55;
-      return 0.85;
+      return hasSelection ? 0.7 : 0.85;
     });
     return { colors, opacities };
   }, [isExternal, externalData, externalSelectedLabels, focusedClusterId]);
