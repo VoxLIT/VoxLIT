@@ -186,3 +186,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 <p align="center">
   <sub>Built for audio model interpretability</sub>
 </p>
+
+
+
+<!-- .venv/bin/uvicorn app.main:app --reload --reload-dir app
+.venv/bin/python -m pytest tests/test_diarization_*.py -q -->
