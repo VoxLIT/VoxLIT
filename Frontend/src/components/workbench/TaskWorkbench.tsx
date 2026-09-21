@@ -7,7 +7,7 @@ import { DeepfakeEmbeddingPanel } from "@/features/deepfake";
 import { AudioDatasetPanel } from "../panels/AudioDatasetPanel";
 import { DatapointEditorPanel } from "../panels/DatapointEditorPanel";
 import { EmbeddingProvider } from "../../contexts/EmbeddingContext";
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import { API_BASE } from '@/lib/api';
 import {
   TaskDefinition,
@@ -26,6 +26,7 @@ import {
   VERIFICATION_CUSTOM_DATASET_STORAGE_KEY,
   isValidCustomDatasetName,
 } from '@/tasks/registry';
+import { clusterMapStore } from '@/features/verification/clusterMapStore';
 import { toast } from 'sonner';
 
 /** Reads the saved custom dataset name from sessionStorage, validating it
@@ -153,6 +154,14 @@ export const TaskWorkbench = ({ task }: TaskWorkbenchProps) => {
   const uploadedCount = useMemo(
     () => sessionAssets.filter((a) => a.origin === 'upload').length,
     [sessionAssets]
+  );
+
+  // Cluster map: recording_id → cluster_id, published by SpeakerVerificationWorkbench
+  // after each batch analysis. Drives the Cluster column in the Audio Dataset table.
+  const clusterMap = useSyncExternalStore(
+    clusterMapStore.subscribe,
+    clusterMapStore.getSnapshot,
+    clusterMapStore.getSnapshot,
   );
 
   // Appends a newly created session asset (top-bar upload or a perturbation
@@ -966,6 +975,7 @@ export const TaskWorkbench = ({ task }: TaskWorkbenchProps) => {
                     verificationUploadedCount={task.id === 'verification' ? uploadedCount : undefined}
                     refreshToken={customDatasetRefreshToken}
                     isRestoringDataset={task.id === 'verification' ? verificationRestoring : undefined}
+                    clusterMap={task.id === 'verification' ? clusterMap : undefined}
                   />
                 </Panel>
               </PanelGroup>

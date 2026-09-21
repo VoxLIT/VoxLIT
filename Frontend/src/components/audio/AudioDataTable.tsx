@@ -63,9 +63,12 @@ interface AudioDataTableProps {
    *  Analysis supports at most 100 recordings). Undefined for every other
    *  selectionVariant — behavior there is unchanged. */
   maxSelectable?: number;
+  /** Verification-only: maps recording_id → cluster_id. When provided, shows
+   *  a Cluster column in the verification table. */
+  clusterMap?: Record<string, string>;
 }
 
-export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData, model, dataset, datasetMetadata, uploadedFiles, onFilePlay, predictionMap, inferenceStatus, onVisibleRowIdsChange, selectionVariant = 'default', checkedIds, onCheckedIdsChange, maxSelectable }: AudioDataTableProps) => {
+export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData, model, dataset, datasetMetadata, uploadedFiles, onFilePlay, predictionMap, inferenceStatus, onVisibleRowIdsChange, selectionVariant = 'default', checkedIds, onCheckedIdsChange, maxSelectable, clusterMap }: AudioDataTableProps) => {
   // Branch: dataset mode vs custom uploads
   const hasDatasetMetadata = (datasetMetadata?.length || 0) > 0;
   const hasUploadedFiles = uploadedFiles && uploadedFiles.length > 0;
@@ -364,21 +367,17 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
       },
     },
     {
-      id: "extension",
+      id: "cluster",
       accessorFn: (row: any) => {
-        if ('file_id' in row) {
-          return "";
-        }
-        const data = row as DatasetRow;
-        return getFrom(data, ["extension"], "");
+        const rowId = 'file_id' in row ? (row as AudioData).id : getDatasetRowId(row as DatasetRow, "");
+        return clusterMap?.[rowId] ?? "";
       },
-      header: "Extension",
+      header: "Cluster",
       cell: ({ row }) => {
-        if ('file_id' in (row.original as any)) {
-          return <span className="text-xs text-muted-foreground">—</span>;
-        }
-        const data = row.original as DatasetRow;
-        return <span className="text-xs text-muted-foreground">{getFrom(data, ["extension"], "")}</span>;
+        const rowId = row.id as string;
+        const clusterId = clusterMap?.[rowId];
+        if (!clusterId) return <span className="text-xs text-muted-foreground">—</span>;
+        return <span className="font-mono text-xs">{clusterId}</span>;
       },
     },
     {
@@ -423,7 +422,7 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
         );
       },
     },
-  ], [checkedIds, onCheckedIdsChange, getFrom, maxSelectable]);
+  ], [checkedIds, onCheckedIdsChange, getFrom, getDatasetRowId, maxSelectable, clusterMap]);
 
   // Helper function to determine if ground truth should be shown
   const shouldShowGroundTruth = useMemo(() => {

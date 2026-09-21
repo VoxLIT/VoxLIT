@@ -11,3 +11,4 @@
  */
 export { SpeakerVerificationWorkbench } from "./SpeakerVerificationWorkbench.tsx";
 export { ClusterAssignmentResults } from "./ClusterAssignmentResults.tsx";
+export { ClusterSaliencyTab } from "./ClusterSaliencyTab.tsx";
