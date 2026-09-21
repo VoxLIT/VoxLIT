@@ -14,6 +14,7 @@ segment-embedding rules (task_b `service.py`).
 
 import hashlib
 import math
+import sys
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -609,6 +610,59 @@ def test_a_gated_pipeline_raises_instead_of_building_a_dead_adapter(
     assert "HF_TOKEN" in message
     # The outer handler must not have re-wrapped our own message into itself.
     assert message.count("Could not load") == 1
+
+
+# ---------------------------------------------------------------------------
+# Missing / blank HF_TOKEN -- the message has to say where we looked
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("blank", [None, "", "   ", "\t\n"])
+def test_a_blank_token_is_treated_as_missing(monkeypatch, blank):
+    """A whitespace token must not reach Hugging Face as if it were real --
+    that turns a local misconfiguration into an opaque 401 minutes later."""
+
+    import pyannote.audio
+
+    monkeypatch.setattr(service.settings, "HF_TOKEN", blank)
+    # Fail loudly if the blank token ever gets past the guard.
+    monkeypatch.setattr(
+        pyannote.audio.Pipeline,
+        "from_pretrained",
+        classmethod(lambda cls, *a, **k: pytest.fail("token guard was bypassed")),
+    )
+
+    with pytest.raises(service.DiarizationModelUnavailable) as error:
+        service._Pyannote31Adapter(service.MODEL_SPECS["pyannote-3.1"])
+
+    assert "HF_TOKEN" in str(error.value)
+
+
+def test_the_missing_token_message_names_the_env_file_it_read(monkeypatch):
+    monkeypatch.setattr(service.settings, "HF_TOKEN", None)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+
+    message = service._missing_token_message()
+
+    # Naming the actual path is the point: it separates "wrong file" from
+    # "file missing" from "environment is shadowing it" without a bisect.
+    assert str(service.settings.model_config["env_file"]) in message
+    assert "not in the process environment" in message
+    assert sys.executable in message
+
+
+def test_the_missing_token_message_calls_out_a_shadowing_environment(monkeypatch):
+    """pydantic-settings gives os.environ precedence over env_file, so an
+    exported blank value silently beats a correct .env. That is the failure
+    mode worth naming explicitly."""
+
+    monkeypatch.setattr(service.settings, "HF_TOKEN", "")
+    monkeypatch.setenv("HF_TOKEN", "   ")
+
+    message = service._missing_token_message()
+
+    assert "overrides the .env value" in message
+    assert "unset hf_token" in message.lower()
 
 
 def test_a_failed_load_is_never_cached(gated_pipeline, isolated_model_cache):

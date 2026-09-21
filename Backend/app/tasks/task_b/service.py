@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sys
 import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -128,6 +129,56 @@ def _load_waveform(audio_path: str | Path):
     return waveform, TARGET_SAMPLE_RATE
 
 
+def _missing_token_message() -> str:
+    """Explain a missing HF_TOKEN by reporting where we actually looked.
+
+    The old message just asserted the token was unset, which sends you hunting
+    through settings, .env and your shell in turn. Every fact needed to tell
+    those apart is available here, so state them:
+
+    * which env_file the settings object is configured with, and whether it is
+      really on disk;
+    * whether the process environment defines HF_TOKEN -- pydantic-settings
+      gives os.environ precedence over env_file, so an exported blank value
+      silently shadows a perfectly good .env;
+    * which interpreter is running, which is what exposes a server started
+      with the wrong uvicorn (bare `uvicorn` is not this project's .venv).
+    """
+    lines = [
+        "HF_TOKEN is not set. The pyannote diarization models are gated: "
+        "accept their conditions on Hugging Face and put "
+        "HF_TOKEN=<your token> in Backend/.env."
+    ]
+
+    env_file = settings.model_config.get("env_file")
+    if env_file is None:
+        lines.append("Settings is configured with no env_file at all.")
+    else:
+        exists = Path(env_file).is_file()
+        lines.append(
+            f"Settings reads env_file {env_file} "
+            f"({'found' if exists else 'MISSING -- create it'})."
+        )
+
+    environ_value = os.environ.get("HF_TOKEN")
+    if environ_value is None:
+        lines.append("HF_TOKEN is not in the process environment.")
+    elif not environ_value.strip():
+        lines.append(
+            "HF_TOKEN IS in the process environment but blank, which "
+            "overrides the .env value -- the environment wins over env_file. "
+            "Unset it (`unset HF_TOKEN`) and restart."
+        )
+    else:
+        lines.append(
+            "HF_TOKEN is in the process environment with a value, so this "
+            "process is not the one that read it -- check for a stale server."
+        )
+
+    lines.append(f"Running interpreter: {sys.executable}")
+    return " ".join(lines)
+
+
 class _Pyannote31Adapter:
     """Wraps the 3.1 pipeline + a standalone copy of its embedding model."""
 
@@ -141,13 +192,9 @@ class _Pyannote31Adapter:
                 "Install the backend requirements and restart the API."
             ) from error
 
-        token = settings.HF_TOKEN
+        token = (settings.HF_TOKEN or "").strip()
         if not token:
-            raise DiarizationModelUnavailable(
-                "HF_TOKEN is not set. The pyannote diarization models are "
-                "gated: accept their conditions on Hugging Face and set "
-                "HF_TOKEN in the environment."
-            )
+            raise DiarizationModelUnavailable(_missing_token_message())
 
         # Same torch>=2.6 weights_only workaround as the verification task's
         # _WeSpeakerAdapter: trusted source (official gated pyannote repos).
