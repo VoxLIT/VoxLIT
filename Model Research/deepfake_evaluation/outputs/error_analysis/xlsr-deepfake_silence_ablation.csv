@@ -1,0 +1,21 @@
+file_id,truth,attack,duration,speech_seconds,non_speech_seconds,non_speech_fraction,original_score,trimmed_score,trimmed_applicable,non_speech_score,non_speech_applicable,non_speech_reason
+LA_E_1070252,bonafide,-,5.077,3.424,1.653,0.3255,0.063251,0.428232,True,0.868096,True,
+LA_E_1118791,bonafide,-,3.112,1.696,1.416,0.455,0.069412,0.769635,True,0.133787,True,
+LA_E_1284209,bonafide,-,4.688,2.08,2.608,0.5564,0.072631,0.215052,True,0.157065,True,
+LA_E_1354185,bonafide,-,4.398,2.848,1.55,0.3524,0.063504,0.105563,True,0.580653,True,
+LA_E_1382043,bonafide,-,2.853,1.632,1.22,0.4279,0.068708,0.113708,True,0.879418,True,
+LA_E_1409912,bonafide,-,2.22,1.152,1.068,0.4811,0.083465,0.908857,True,0.103539,True,
+LA_E_1430330,bonafide,-,3.706,1.44,2.266,0.6115,0.069314,0.810421,True,0.07669,True,
+LA_E_1644905,bonafide,-,2.215,1.152,1.063,0.48,0.073982,0.178699,True,0.902057,True,
+LA_E_1692344,bonafide,-,2.81,0.8,2.01,0.7153,0.068192,0.845116,True,0.09959,True,
+LA_E_1722681,bonafide,-,3.027,1.056,1.971,0.6511,0.068234,0.719882,True,0.083195,True,
+LA_E_1054584,spoof,A17,7.34,3.264,4.076,0.5553,0.901191,0.914808,True,0.765272,True,
+LA_E_1068790,spoof,A16,4.337,3.904,0.433,0.0998,0.888878,0.919432,True,,False,Only 0.43s of non-speech audio was found (at least 0.50s is needed). The probe cannot say anything reliable about this clip.
+LA_E_1110205,spoof,A07,3.992,3.896,0.096,0.024,0.922157,0.920313,True,,False,Only 0.10s of non-speech audio was found (at least 0.50s is needed). The probe cannot say anything reliable about this clip.
+LA_E_1119893,spoof,A13,4.187,4.187,0.0,0.0,0.918802,0.918802,True,,False,Only 0.00s of non-speech audio was found (at least 0.50s is needed). The probe cannot say anything reliable about this clip.
+LA_E_1126751,spoof,A19,3.062,1.952,1.11,0.3625,0.462291,0.892411,True,0.178707,True,
+LA_E_1233355,spoof,A17,2.254,1.184,1.07,0.4746,0.900819,0.915078,True,0.887671,True,
+LA_E_1510540,spoof,A12,2.469,2.144,0.325,0.1315,0.921742,0.923209,True,,False,Only 0.32s of non-speech audio was found (at least 0.50s is needed). The probe cannot say anything reliable about this clip.
+LA_E_1779360,spoof,A16,1.995,1.504,0.491,0.246,0.677185,0.918197,True,,False,Only 0.49s of non-speech audio was found (at least 0.50s is needed). The probe cannot say anything reliable about this clip.
+LA_E_1843305,spoof,A10,2.595,2.56,0.035,0.0136,0.872096,0.854744,True,,False,Only 0.04s of non-speech audio was found (at least 0.50s is needed). The probe cannot say anything reliable about this clip.
+LA_E_1893285,spoof,A17,2.647,1.504,1.143,0.4318,0.820004,0.915577,True,0.626791,True,

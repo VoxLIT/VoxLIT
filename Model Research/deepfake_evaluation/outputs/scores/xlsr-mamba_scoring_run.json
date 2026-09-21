@@ -1,0 +1,10 @@
+{
+  "model": "xlsr-mamba",
+  "model_id": "AustinXiao/XLSR-Mamba-LA",
+  "dataset_id": "asvspoof2019-la",
+  "clips_scored_this_run": 200,
+  "clips_in_csv": 200,
+  "seconds_total": 50.75,
+  "seconds_per_clip": 0.254,
+  "embeddings_captured": 200
+}
