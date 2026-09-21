@@ -973,6 +973,7 @@ export const TaskWorkbench = ({ task }: TaskWorkbenchProps) => {
             {/* Right Panel: Audio Player & Datapoint Editor */}
             <Panel defaultSize={25} minSize={20}>
               <DatapointEditorPanel
+                taskId={task.id}
                 selectedFile={selectedFile}
                 selectedEmbeddingFile={selectedEmbeddingFile}
                 dataset={effectiveDataset}

@@ -28,6 +28,7 @@ interface PerturbationResult {
 }
 
 interface DatapointEditorPanelProps {
+  taskId?: string;
   selectedFile?: UploadedFile | null;
   selectedEmbeddingFile?: string | null;
   dataset?: string; // "custom" | dataset key (effective dataset)
@@ -51,6 +52,7 @@ interface DatapointEditorPanelProps {
 }
 
 export const DatapointEditorPanel = ({
+  taskId,
   selectedFile,
   selectedEmbeddingFile,
   dataset = "custom",
@@ -263,156 +265,372 @@ export const DatapointEditorPanel = ({
         </div>
 
       <div className="flex-1 min-h-0 p-3 overflow-y-auto space-y-3 scrollbar-thin">
-        {/* Predictions Section - Top (task-specific, from registry slot) */}
-        {renderPredictionResults?.(showPerturbed)}
+        {taskId === 'verification' ? (
+          /* =========================================================================
+           * Speaker Verification UI Layout:
+           * - Predictions (Cluster Assignment / Pair Verification) at Top
+           * - Consolidated Audio Playback Card (Filename inside, No redundant Sample Info)
+           * ========================================================================= */
+          <>
+            {/* Predictions Section - Top */}
+            {renderPredictionResults?.(showPerturbed)}
 
-        {/* Audio Player & Waveform */}
-        <Card>
-          <CardHeader className="bg-panel-header">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-xs flex items-center gap-1.5">
-                Audio Playback
-                <Tooltip>
-                  <TooltipTrigger>
-                    <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    Interactive audio player with waveform visualization
-                  </TooltipContent>
-                </Tooltip>
-              </CardTitle>
-              {perturbationResult?.success && (
-                <div className="flex items-center gap-0.5 p-0.5 bg-muted border border-border rounded-md">
+            {/* Audio Playback Card */}
+            <Card>
+              <CardHeader className="bg-panel-header">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-xs flex items-center gap-1.5">
+                    Audio Playback
+                    <Tooltip>
+                      <TooltipTrigger>
+                        <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        Interactive audio player with waveform visualization
+                      </TooltipContent>
+                    </Tooltip>
+                  </CardTitle>
+                  {perturbationResult?.success && (
+                    <div className="flex items-center gap-0.5 p-0.5 bg-muted border border-border rounded-md">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant={!showPerturbed ? "default" : "ghost"}
+                            size="sm"
+                            onClick={() => setShowPerturbed(false)}
+                            className={`text-[10px] h-6 px-2.5 transition-all ${
+                              !showPerturbed
+                                ? 'bg-primary hover:bg-primary-hover text-primary-foreground shadow-aws-sm'
+                                : 'text-muted-foreground hover:bg-background'
+                            }`}
+                          >
+                            Original
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          View the original unmodified audio file
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant={showPerturbed ? "default" : "ghost"}
+                            size="sm"
+                            onClick={() => setShowPerturbed(true)}
+                            className={`text-[10px] h-6 px-2.5 transition-all ${
+                              showPerturbed
+                                ? 'bg-primary hover:bg-primary-hover text-primary-foreground shadow-aws-sm'
+                                : 'text-muted-foreground hover:bg-background'
+                            }`}
+                          >
+                            Perturbed
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent className="font-normal">
+                          View the modified audio file with applied perturbations
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-2.5">
+                <div className="text-xs flex items-center justify-between gap-2 pb-1 border-b border-border/50">
+                  <span className="truncate">
+                    <span className="text-muted-foreground font-medium">File: </span>
+                    <span className="font-mono text-foreground">{currentFileInfo?.filename || "No file selected"}</span>
+                  </span>
+                  {showPerturbed && (
+                    <Badge variant="secondary" className="ml-2 shrink-0 text-[9px] bg-blue-100 text-blue-700 border-blue-200">
+                      Perturbed
+                    </Badge>
+                  )}
+                </div>
+                {localPreview && (
+                  <div className="text-xs text-muted-foreground">
+                    <span className="font-medium">Role: </span>
+                    <span className="text-foreground">
+                      {localPreview.role === "enrollment" ? "Enrollment reference" : "Probe"}
+                    </span>
+                  </div>
+                )}
+                {showPerturbed && perturbationResult?.applied_perturbations && (
+                  <div className="flex flex-wrap gap-1">
+                    {perturbationResult.applied_perturbations.map((pert, idx) => (
+                      <Badge key={idx} variant="outline" className="text-[9px] border-blue-300 text-blue-700">
+                        {pert.type.replace('_', ' ')}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                <WaveformViewer
+                  audioUrl={audioUrl}
+                  isPlaying={isPlaying}
+                  requireCredentials={!localPreview && isVerificationRecordingSelected}
+                  onReady={(wavesurfer) => {
+                    wavesurferRef.current = wavesurfer;
+                    const duration = wavesurfer.getDuration();
+                    setDuration(duration);
+                    setAudioMetadata({
+                      duration: duration,
+                      sampleRate: wavesurfer.getDecodedData()?.sampleRate || undefined
+                    });
+                  }}
+                  onProgress={(time, dur) => {
+                    setCurrentTime(time);
+                    setDuration(dur);
+                    if (!audioMetadata.duration && dur > 0) {
+                      setAudioMetadata(prev => ({ ...prev, duration: dur }));
+                    }
+                  }}
+                  onFinish={() => {
+                    setIsPlaying(false);
+                    setCurrentTime(0);
+                    wavesurferRef.current?.seekTo(0);
+                  }}
+                />
+                <AudioPlayer
+                  isPlaying={isPlaying}
+                  onPlayPause={() => {
+                    setIsPlaying(!isPlaying);
+                    if (wavesurferRef.current) {
+                      if (isPlaying) {
+                        wavesurferRef.current.pause();
+                      } else {
+                        wavesurferRef.current.play();
+                      }
+                    }
+                  }}
+                  currentTime={currentTime}
+                  duration={duration}
+                  onSeek={(time) => {
+                    if (wavesurferRef.current) {
+                      wavesurferRef.current.seekTo(time / duration);
+                    }
+                  }}
+                  onVolumeChange={(volume) => {
+                    if (wavesurferRef.current) {
+                      wavesurferRef.current.setVolume(volume);
+                    }
+                  }}
+                />
+              </CardContent>
+            </Card>
+          </>
+        ) : (
+          /* =========================================================================
+           * Other Tasks UI Layout (Transcription, Emotion Recognition, Deepfake):
+           * - Original Sample Info Card at Top
+           * - Predictions Section in Middle
+           * - Audio Playback at Bottom
+           * ========================================================================= */
+          <>
+            {/* Sample Info - Top */}
+            <Card>
+              <CardHeader className="bg-panel-header">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-xs flex items-center gap-1.5">
+                    Sample Info
+                    <Tooltip>
+                      <TooltipTrigger>
+                        <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        Detailed information about the selected audio sample
+                      </TooltipContent>
+                    </Tooltip>
+                  </CardTitle>
+                  {perturbationResult?.success && (
+                    <div className="flex items-center gap-0.5 p-0.5 bg-muted border border-border rounded-md">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant={!showPerturbed ? "default" : "ghost"}
+                            size="sm"
+                            onClick={() => setShowPerturbed(false)}
+                            className={`text-[10px] h-6 px-2.5 transition-all ${
+                              !showPerturbed
+                                ? 'bg-primary hover:bg-primary-hover text-primary-foreground shadow-aws-sm'
+                                : 'text-muted-foreground hover:bg-background'
+                            }`}
+                          >
+                            Original
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          View the original unmodified audio file
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant={showPerturbed ? "default" : "ghost"}
+                            size="sm"
+                            onClick={() => setShowPerturbed(true)}
+                            className={`text-[10px] h-6 px-2.5 transition-all ${
+                              showPerturbed
+                                ? 'bg-primary hover:bg-primary-hover text-primary-foreground shadow-aws-sm'
+                                : 'text-muted-foreground hover:bg-background'
+                            }`}
+                          >
+                            Perturbed
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent className="font-normal">
+                          View the modified audio file with applied perturbations
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-1.5">
+                {localPreview && (
+                  <div className="text-xs-tight">
+                    <span className="text-gray-500">Role:</span>
+                    <span className="ml-2 text-gray-700">
+                      {localPreview.role === "enrollment" ? "Enrollment reference" : "Probe"}
+                    </span>
+                  </div>
+                )}
+                <div className="text-xs-tight">
+                  <span className="text-gray-500">File:</span>
+                  <span className="ml-2 font-mono text-gray-700">{currentFileInfo?.filename || "No file selected"}</span>
+                  {showPerturbed && (
+                    <Badge variant="secondary" className="ml-2 text-[9px] bg-blue-100 text-blue-700 border-blue-200">P</Badge>
+                  )}
+                </div>
+                <div className="text-xs-tight">
+                  <span className="text-gray-500">Duration:</span>
+                  <span className="ml-2 text-gray-700">
+                    {currentFileInfo?.duration
+                      ? `${currentFileInfo.duration.toFixed(1)}s`
+                      : audioMetadata.duration
+                      ? `${audioMetadata.duration.toFixed(1)}s`
+                      : !localPreview && isVerificationRecordingSelected && !verificationRecording ? "Not available" : "Loading..."}
+                  </span>
+                </div>
+                <div className="text-xs-tight">
+                  <span className="text-gray-500">Sample Rate:</span>
+                  <span className="ml-2 text-gray-700">
+                    {currentFileInfo?.sample_rate
+                      ? `${(currentFileInfo.sample_rate / 1000).toFixed(1)}kHz`
+                      : audioMetadata.sampleRate
+                      ? `${(audioMetadata.sampleRate / 1000).toFixed(1)}kHz`
+                      : !localPreview && isVerificationRecordingSelected && !verificationRecording ? "Not available" : "Loading..."}
+                  </span>
+                </div>
+                {currentFileInfo?.extension && (
+                  <div className="text-xs-tight">
+                    <span className="text-gray-500">Extension:</span>
+                    <span className="ml-2 text-gray-700">{currentFileInfo.extension}</span>
+                  </div>
+                )}
+                {currentFileInfo?.size && (
+                  <div className="text-xs-tight">
+                    <span className="text-gray-500">Size:</span>
+                    <span className="ml-2 text-gray-700">{(currentFileInfo.size / 1024 / 1024).toFixed(2)} MB</span>
+                  </div>
+                )}
+                {showPerturbed && perturbationResult?.applied_perturbations && (
+                  <div className="text-xs-tight">
+                    <span className="text-gray-500">Applied:</span>
+                    <div className="ml-2 mt-1 space-y-1">
+                      {perturbationResult.applied_perturbations.map((pert, idx) => (
+                        <Badge key={idx} variant="outline" className="text-[9px] mr-1 border-blue-300 text-blue-700">
+                          {pert.type.replace('_', ' ')}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {showPerturbed && perturbationResult?.filename && predictionMap && (
+                  <div className="text-xs-tight mt-2">
+                    <span className="text-gray-500">Perturbed Prediction:</span>
+                    <div className="ml-2 mt-1">
+                      <Badge variant="secondary" className="text-[10px] bg-blue-100 text-blue-700 border-blue-200">
+                        {predictionMap[perturbationResult.filename] || "Loading..."}
+                      </Badge>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Predictions Section - Middle (task-specific, from registry slot) */}
+            {renderPredictionResults?.(showPerturbed)}
+
+            {/* Audio Player & Waveform - Bottom */}
+            <Card>
+              <CardHeader className="bg-panel-header">
+                <CardTitle className="text-xs flex items-center gap-1.5">
+                  Audio Playback
                   <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant={!showPerturbed ? "default" : "ghost"}
-                        size="sm"
-                        onClick={() => setShowPerturbed(false)}
-                        className={`text-[10px] h-6 px-2.5 transition-all ${
-                          !showPerturbed
-                            ? 'bg-primary hover:bg-primary-hover text-primary-foreground shadow-aws-sm'
-                            : 'text-muted-foreground hover:bg-background'
-                        }`}
-                      >
-                        Original
-                      </Button>
+                    <TooltipTrigger>
+                      <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
                     </TooltipTrigger>
                     <TooltipContent>
-                      View the original unmodified audio file
+                      Interactive audio player with waveform visualization
                     </TooltipContent>
                   </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant={showPerturbed ? "default" : "ghost"}
-                        size="sm"
-                        onClick={() => setShowPerturbed(true)}
-                        className={`text-[10px] h-6 px-2.5 transition-all ${
-                          showPerturbed
-                            ? 'bg-primary hover:bg-primary-hover text-primary-foreground shadow-aws-sm'
-                            : 'text-muted-foreground hover:bg-background'
-                        }`}
-                      >
-                        Perturbed
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent className="font-normal">
-                      View the modified audio file with applied perturbations
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-2.5">
-            <div className="text-xs flex items-center justify-between gap-2 pb-1 border-b border-border/50">
-              <span className="truncate">
-                <span className="text-muted-foreground font-medium">File: </span>
-                <span className="font-mono text-foreground">{currentFileInfo?.filename || "No file selected"}</span>
-              </span>
-              {showPerturbed && (
-                <Badge variant="secondary" className="ml-2 shrink-0 text-[9px] bg-blue-100 text-blue-700 border-blue-200">
-                  Perturbed
-                </Badge>
-              )}
-            </div>
-            {localPreview && (
-              <div className="text-xs text-muted-foreground">
-                <span className="font-medium">Role: </span>
-                <span className="text-foreground">
-                  {localPreview.role === "enrollment" ? "Enrollment reference" : "Probe"}
-                </span>
-              </div>
-            )}
-            {showPerturbed && perturbationResult?.applied_perturbations && (
-              <div className="flex flex-wrap gap-1">
-                {perturbationResult.applied_perturbations.map((pert, idx) => (
-                  <Badge key={idx} variant="outline" className="text-[9px] border-blue-300 text-blue-700">
-                    {pert.type.replace('_', ' ')}
-                  </Badge>
-                ))}
-              </div>
-            )}
-            <WaveformViewer
-              audioUrl={audioUrl}
-              isPlaying={isPlaying}
-              requireCredentials={!localPreview && isVerificationRecordingSelected}
-              onReady={(wavesurfer) => {
-
-                wavesurferRef.current = wavesurfer;
-                const duration = wavesurfer.getDuration();
-                setDuration(duration);
-
-                // Update metadata state for file info display
-                setAudioMetadata({
-                  duration: duration,
-                  sampleRate: wavesurfer.getDecodedData()?.sampleRate || undefined
-                });
-              }}
-              onProgress={(time, dur) => {
-                setCurrentTime(time);
-                setDuration(dur);
-
-                // Update duration in metadata if not already set
-                if (!audioMetadata.duration && dur > 0) {
-                  setAudioMetadata(prev => ({ ...prev, duration: dur }));
-                }
-              }}
-              onFinish={() => {
-                // Reset player when the clip ends: play icon + slider/cursor to start
-                setIsPlaying(false);
-                setCurrentTime(0);
-                wavesurferRef.current?.seekTo(0);
-              }}
-            />
-            <AudioPlayer
-              isPlaying={isPlaying}
-              onPlayPause={() => {
-                setIsPlaying(!isPlaying);
-                if (wavesurferRef.current) {
-                  if (isPlaying) {
-                    wavesurferRef.current.pause();
-                  } else {
-                    wavesurferRef.current.play();
-                  }
-                }
-              }}
-              currentTime={currentTime}
-              duration={duration}
-              onSeek={(time) => {
-                if (wavesurferRef.current) {
-                  wavesurferRef.current.seekTo(time / duration);
-                }
-              }}
-              onVolumeChange={(volume) => {
-                if (wavesurferRef.current) {
-                  wavesurferRef.current.setVolume(volume);
-                }
-              }}
-            />
-          </CardContent>
-        </Card>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2.5">
+                <WaveformViewer
+                  audioUrl={audioUrl}
+                  isPlaying={isPlaying}
+                  requireCredentials={!localPreview && isVerificationRecordingSelected}
+                  onReady={(wavesurfer) => {
+                    wavesurferRef.current = wavesurfer;
+                    const duration = wavesurfer.getDuration();
+                    setDuration(duration);
+                    setAudioMetadata({
+                      duration: duration,
+                      sampleRate: wavesurfer.getDecodedData()?.sampleRate || undefined
+                    });
+                  }}
+                  onProgress={(time, dur) => {
+                    setCurrentTime(time);
+                    setDuration(dur);
+                    if (!audioMetadata.duration && dur > 0) {
+                      setAudioMetadata(prev => ({ ...prev, duration: dur }));
+                    }
+                  }}
+                  onFinish={() => {
+                    setIsPlaying(false);
+                    setCurrentTime(0);
+                    wavesurferRef.current?.seekTo(0);
+                  }}
+                />
+                <AudioPlayer
+                  isPlaying={isPlaying}
+                  onPlayPause={() => {
+                    setIsPlaying(!isPlaying);
+                    if (wavesurferRef.current) {
+                      if (isPlaying) {
+                        wavesurferRef.current.pause();
+                      } else {
+                        wavesurferRef.current.play();
+                      }
+                    }
+                  }}
+                  currentTime={currentTime}
+                  duration={duration}
+                  onSeek={(time) => {
+                    if (wavesurferRef.current) {
+                      wavesurferRef.current.seekTo(time / duration);
+                    }
+                  }}
+                  onVolumeChange={(volume) => {
+                    if (wavesurferRef.current) {
+                      wavesurferRef.current.setVolume(volume);
+                    }
+                  }}
+                />
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
     </div>
     </TooltipProvider>

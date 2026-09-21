@@ -57,7 +57,7 @@ export const ClusterAssignmentResults = ({ selectedFile }: PredictionResultsProp
     );
   }
 
-  const { stats, clusterSize, modelLabel, clusteringDistanceThreshold, groundTruthGroup, groundTruthAvailable } =
+  const { stats, clusterSize, modelLabel, clusteringDistanceThreshold } =
     snapshot;
 
   return (
@@ -67,24 +67,6 @@ export const ClusterAssignmentResults = ({ selectedFile }: PredictionResultsProp
         <CardContent className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
           <span className="text-muted-foreground">Predicted cluster</span>
           <Badge variant="secondary" className="w-fit">{stats.cluster_id}</Badge>
-
-          <span className="flex items-center gap-1 text-muted-foreground">
-            Ground-truth speaker group
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
-              </TooltipTrigger>
-              <TooltipContent className="text-xs space-y-1">
-                <p>The speaker this recording is actually from, per known ground truth for this dataset.</p>
-                <p>Shown for offline evaluation only — it plays no part in how clusters or predictions are produced.</p>
-              </TooltipContent>
-            </Tooltip>
-          </span>
-          {groundTruthAvailable && groundTruthGroup !== null ? (
-            <Badge variant="secondary" className="w-fit">{groundTruthGroup}</Badge>
-          ) : (
-            <span className="text-muted-foreground italic">Ground-truth evaluation unavailable for this batch.</span>
-          )}
 
           <span className="text-muted-foreground">Cluster size</span>
           <span>{clusterSize} recording{clusterSize === 1 ? "" : "s"}</span>
