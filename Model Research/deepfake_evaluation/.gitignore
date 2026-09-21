@@ -1,0 +1,6 @@
+# Head-input vectors: ~200 x 1024 floats per model. Large, and regenerable in
+# under a minute with src/score_dataset.py. The per-clip scores they were
+# taken alongside ARE committed, because every number in the test plan is
+# derived from those.
+outputs/embeddings/
+__pycache__/
