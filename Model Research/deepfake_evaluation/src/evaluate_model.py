@@ -34,6 +34,7 @@ def load_scores(model: str) -> list[dict]:
             row["spoof_probability"] = float(row["spoof_probability"])
             row["duration"] = float(row["duration"])
             row["analysed_seconds"] = float(row["analysed_seconds"])
+            row["analysis_window_seconds"] = float(row["analysis_window_seconds"])
             row["truncated"] = row["truncated"].lower() == "true"
             rows.append(row)
     return rows

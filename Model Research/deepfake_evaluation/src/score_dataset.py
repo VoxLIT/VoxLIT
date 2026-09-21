@@ -120,7 +120,7 @@ def main() -> int:
         load_ground_truth,
         resolve_recording_path,
     )
-    from app.tasks.deepfake.service import get_model, get_model_spec, run_detection
+    from app.tasks.deepfake.service import get_model, get_model_spec
 
     spec = get_model_spec(args.model)
     adapter = get_model(args.model)
@@ -158,9 +158,12 @@ def main() -> int:
         if disagreed:
             raise SystemExit(f"Offline scoring drifted from run_detection: {disagreed}")
 
+    # Key the header on the file being empty, not on `done`: a run interrupted
+    # right after the header leaves a header-only file, and `done` is empty.
+    needs_header = not scores_path.exists() or scores_path.stat().st_size == 0
     handle = open(scores_path, "a", newline="", encoding="utf-8")
     writer = csv.DictWriter(handle, fieldnames=FIELDS)
-    if not done:
+    if needs_header:
         writer.writeheader()
 
     started = time.perf_counter()
