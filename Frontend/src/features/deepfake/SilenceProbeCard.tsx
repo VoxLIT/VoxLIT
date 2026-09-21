@@ -61,7 +61,7 @@ export const SilenceProbeCard = ({ model, modelLabel, recordingId }: SilenceProb
     }
   };
 
-  const verdict = result ? readVerdict(result) : null;
+  const verdict = result ? readProbeVerdict(result) : null;
 
   return (
     <Card>
@@ -231,7 +231,7 @@ const VariantTile = ({
 };
 
 /** Turn the three scores into the finding the researcher is looking for. */
-function readVerdict(result: SilenceProbeResult) {
+export function readProbeVerdict(result: SilenceProbeResult) {
   const { original, trimmed, non_speech: nonSpeech } = result.variants;
   const base = original.spoof_probability ?? 0;
 

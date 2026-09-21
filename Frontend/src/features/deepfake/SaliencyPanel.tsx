@@ -103,7 +103,7 @@ export const SaliencyPanel = ({ model, modelLabel, recordingId }: SaliencyPanelP
     }
   };
 
-  const verdict = useMemo(() => (result ? readVerdict(result) : null), [result]);
+  const verdict = useMemo(() => (result ? readSaliencyVerdict(result) : null), [result]);
 
   const seekTo = (seconds: number) => {
     setPosition(seconds);
@@ -323,7 +323,7 @@ const SaliencyStrip = ({
 };
 
 /** State the finding the view exists to deliver. */
-function readVerdict(result: DeepfakeSaliency) {
+export function readSaliencyVerdict(result: DeepfakeSaliency) {
   const inSpeech = result.saliency_in_speech_fraction;
   if (inSpeech === null) {
     return null;

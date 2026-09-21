@@ -1,0 +1,10 @@
+{
+  "model": "xlsr-deepfake",
+  "model_id": "Gustking/wav2vec2-large-xlsr-deepfake-audio-classification",
+  "dataset_id": "asvspoof2019-la",
+  "clips_scored_this_run": 197,
+  "clips_in_csv": 200,
+  "seconds_total": 32.82,
+  "seconds_per_clip": 0.167,
+  "embeddings_captured": 197
+}

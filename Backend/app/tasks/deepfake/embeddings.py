@@ -17,6 +17,7 @@ re-reads the cache and re-runs the reducer.
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import numpy as np
 from starlette.concurrency import run_in_threadpool
@@ -61,9 +62,18 @@ async def _embed_one(model_key: str, path) -> dict:
 
 
 async def project_dataset(
-    model_key: str, reduction_method: str, n_components: int
+    model_key: str,
+    reduction_method: str,
+    n_components: int,
+    extra_clips: list[tuple[str, str, Path]] | None = None,
 ) -> dict:
-    """Score every recording, then reduce the embeddings to 2 or 3 axes."""
+    """Score every recording, then reduce the embeddings to 2 or 3 axes.
+
+    `extra_clips` are the visitor's own clips as (id, display name, path). They
+    are projected together with the dataset -- so they land on the same axes --
+    and appended after it, flagged `uploaded: true`.
+    """
+    extra_clips = list(extra_clips or [])
     spec = get_model_spec(model_key)
     recordings = list_recordings()
     if not recordings:
@@ -76,14 +86,26 @@ async def project_dataset(
             await _embed_one(model_key, resolve_recording_path(recording.recording_id))
             for recording in recordings
         ]
+        extra_payloads = [await _embed_one(model_key, path) for _, _, path in extra_clips]
 
-    matrix = np.asarray([payload["embedding"] for payload in payloads], dtype=np.float64)
+    all_payloads = payloads + extra_payloads
+    matrix = np.asarray([payload["embedding"] for payload in all_payloads], dtype=np.float64)
     if not np.isfinite(matrix).all():
         raise ValueError("Embeddings must not contain NaN or infinite values.")
 
     coordinates, effective_components, method_used = await run_in_threadpool(
         reduce_embedding_matrix, matrix, reduction_method, n_components
     )
+
+    def _row(recording_id: str, display_filename: str, payload: dict, uploaded: bool) -> dict:
+        row = {
+            "recording_id": recording_id,
+            "display_filename": display_filename,
+            "spoof_probability": payload["spoof_probability"],
+            "decision": "spoof" if payload["spoof_probability"] >= spec.threshold else "bonafide",
+        }
+        # Only user clips carry the flag, so dataset rows keep their contract.
+        return {**row, "uploaded": True} if uploaded else row
 
     return {
         "model": model_key,
@@ -98,15 +120,12 @@ async def project_dataset(
         "threshold_calibrated": spec.threshold_calibrated,
         # Index-aligned with `coordinates`.
         "recordings": [
-            {
-                "recording_id": recording.recording_id,
-                "display_filename": recording.display_filename,
-                "spoof_probability": payload["spoof_probability"],
-                "decision": "spoof"
-                if payload["spoof_probability"] >= spec.threshold
-                else "bonafide",
-            }
+            _row(recording.recording_id, recording.display_filename, payload, False)
             for recording, payload in zip(recordings, payloads)
+        ]
+        + [
+            _row(clip_id, name, payload, True)
+            for (clip_id, name, _), payload in zip(extra_clips, extra_payloads)
         ],
         "coordinates": coordinates.tolist(),
     }

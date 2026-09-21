@@ -10,6 +10,19 @@ export interface RecordingInfo {
   size_bytes: number;
 }
 
+/** One entry from GET /tasks/task-b/models — the backend `DiarizationModelSpec`.
+ *  `glass_box_note` says what the selected model actually changes, so the
+ *  header never implies more separation between the three than exists. */
+export interface DiarizationModelInfo {
+  key: string;
+  label: string;
+  pipeline_id: string;
+  embedding_model_id: string;
+  embedding_dimension: number;
+  recommended: boolean;
+  glass_box_note: string;
+}
+
 export type ConfidenceBucket = "high" | "medium" | "uncertain" | null;
 
 export interface DiarizationSegment {

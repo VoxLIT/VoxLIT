@@ -1,0 +1,58 @@
+{
+  "models": [
+    "xlsr-deepfake",
+    "xlsr-mamba"
+  ],
+  "clips_compared": 200,
+  "decision_agreement_rate": 0.985,
+  "spearman_rank_correlation_of_scores": 0.7521,
+  "xlsr-deepfake_errors": [
+    "LA_E_1126751",
+    "LA_E_3986097"
+  ],
+  "xlsr-mamba_errors": [
+    "LA_E_9811744"
+  ],
+  "errors_in_common": [],
+  "errors_unique_to_one_model": [
+    "LA_E_1126751",
+    "LA_E_3986097",
+    "LA_E_9811744"
+  ],
+  "both_models_wrong_and_agreeing": [],
+  "disagreements": [
+    {
+      "file_id": "LA_E_1126751",
+      "truth": "spoof",
+      "attack": "A19",
+      "xlsr-deepfake_score": 0.462291,
+      "xlsr-mamba_score": 0.998844,
+      "correct_model": "xlsr-mamba"
+    },
+    {
+      "file_id": "LA_E_3986097",
+      "truth": "spoof",
+      "attack": "A19",
+      "xlsr-deepfake_score": 0.142884,
+      "xlsr-mamba_score": 0.999541,
+      "correct_model": "xlsr-mamba"
+    },
+    {
+      "file_id": "LA_E_9811744",
+      "truth": "spoof",
+      "attack": "A18",
+      "xlsr-deepfake_score": 0.893765,
+      "xlsr-mamba_score": 0.017944,
+      "correct_model": "xlsr-deepfake"
+    }
+  ],
+  "analysis_window_seconds": {
+    "xlsr-deepfake": "30.0",
+    "xlsr-mamba": "4.17"
+  },
+  "clips_truncated": {
+    "xlsr-deepfake": 0,
+    "xlsr-mamba": 41
+  },
+  "interpretation": "Errors sitting on different clips means the two detectors fail independently, so a disagreement between them is a real signal for the user. Errors in common would mean the corpus, not the architecture, decides what gets missed."
+}

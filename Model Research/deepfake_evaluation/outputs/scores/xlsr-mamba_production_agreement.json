@@ -1,0 +1,26 @@
+[
+  {
+    "file": "LA_E_1054584.flac",
+    "production_score": 0.999589,
+    "shortcut_score": 0.999589,
+    "production_decision": "spoof",
+    "shortcut_decision": "spoof",
+    "agrees": true
+  },
+  {
+    "file": "LA_E_1068790.flac",
+    "production_score": 0.999716,
+    "shortcut_score": 0.999716,
+    "production_decision": "spoof",
+    "shortcut_decision": "spoof",
+    "agrees": true
+  },
+  {
+    "file": "LA_E_1070252.flac",
+    "production_score": 0.000406,
+    "shortcut_score": 0.000406,
+    "production_decision": "bonafide",
+    "shortcut_decision": "bonafide",
+    "agrees": true
+  }
+]

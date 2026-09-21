@@ -7,6 +7,17 @@ export interface RecordingInfo {
   display_filename: string;
   extension: string;
   size_bytes: number;
+  /** Read from the file header; null when it could not be read. */
+  duration_seconds?: number | null;
+}
+
+/** One of the visitor's own clips (POST/GET /tasks/deepfake/uploads). Same
+ *  shape as a demo recording, so every per-clip view accepts either; the id
+ *  starts with `up_`. Stored for 24 h, visible only to the session that made it. */
+export interface UserClip extends RecordingInfo {
+  source: "upload" | "recording";
+  /** Unix seconds. */
+  created_at: number;
 }
 
 /** Response shape of POST /tasks/deepfake/run. */
@@ -188,6 +199,8 @@ export interface EmbeddingRecording {
   spoof_probability: number;
   /** The model's decision at its shipped threshold. */
   decision: "spoof" | "bonafide";
+  /** Present (true) only on the visitor's own clips, placed on the dataset map. */
+  uploaded?: boolean;
 }
 
 /** Response shape of POST /tasks/deepfake/embeddings — Feature 4.

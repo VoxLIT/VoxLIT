@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from dataclasses import asdict
+from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
@@ -29,6 +32,18 @@ from .evaluation import evaluate_dataset
 from .saliency import METHOD as SALIENCY_METHOD, SaliencyUnavailable, generate_saliency
 from .silence_probe import SILENCE_TOP_DB, run_silence_probe
 from .metrics import NotEnoughLabelledData
+from .uploads import (
+    ALLOWED_UPLOAD_EXTENSIONS,
+    MAX_UPLOAD_BYTES,
+    UploadNotFound,
+    UploadRejected,
+    delete_upload,
+    get_upload,
+    is_upload_id,
+    list_uploads,
+    resolve_upload_path,
+    save_upload,
+)
 from .projection import SUPPORTED_PROJECTION_COMPONENTS, SUPPORTED_REDUCTION_METHODS
 from .service import (
     THRESHOLD_VERSION,
@@ -43,6 +58,20 @@ from .service import (
 router = APIRouter()
 
 CACHE_TTL_SECONDS = 7 * 24 * 60 * 60  # demo files are static; keep for a week
+
+
+def _resolve_clip(recording_id: str, request: Request) -> Path:
+    """A demo `rec_...` id or one of this session's `up_...` clips -> Path.
+
+    Each prefix goes to exactly one resolver and never falls through to the
+    other. Both raise a 404 on any miss, including another session's clip.
+    """
+    try:
+        if is_upload_id(recording_id):
+            return resolve_upload_path(getattr(request.state, "sid", None), recording_id)
+        return resolve_recording_path(recording_id)
+    except (DatasetUnavailable, RecordingNotFound, UploadNotFound) as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @router.get("/models")
@@ -100,6 +129,83 @@ async def dataset_recording_audio(recording_id: str, request: Request):
     return stream_audio_file(path, request, path.name, "audio/flac")
 
 
+# ---------------------------------------------------------------------------
+# The visitor's own clips (uploads + microphone recordings)
+# ---------------------------------------------------------------------------
+
+
+def _write_limited(file: UploadFile, destination: Path) -> None:
+    """Copy the upload to disk, refusing as soon as it passes the size cap."""
+    written = 0
+    with destination.open("wb") as output:
+        while chunk := file.file.read(1 << 20):
+            written += len(chunk)
+            if written > MAX_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+                )
+            output.write(chunk)
+    if written == 0:
+        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
+
+
+def _store_upload(file: UploadFile, sid: str | None, source: str) -> dict:
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_UPLOAD_EXTENSIONS:
+        allowed = ", ".join(sorted(ALLOWED_UPLOAD_EXTENSIONS))
+        raise HTTPException(status_code=400, detail=f"Unsupported audio format. Allowed: {allowed}.")
+    with tempfile.TemporaryDirectory(prefix="df-upload-") as scratch:
+        raw_path = Path(scratch) / f"raw{suffix}"
+        _write_limited(file, raw_path)
+        try:
+            return asdict(save_upload(sid, raw_path, file.filename, source))
+        except UploadRejected as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except UploadNotFound as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@router.post("/uploads")
+async def upload_clip(
+    request: Request,
+    file: UploadFile = File(...),
+    source: str = Form("upload"),
+):
+    """Store one of the visitor's clips (a file or a microphone recording).
+
+    Returns a RecordingInfo-shaped record whose `up_...` id every per-clip
+    endpoint (/run, /silence-probe, /saliency, /embeddings) accepts.
+    """
+    sid = getattr(request.state, "sid", None)
+    return await run_in_threadpool(_store_upload, file, sid, source)
+
+
+@router.get("/uploads")
+async def uploaded_clips(request: Request):
+    clips = await run_in_threadpool(list_uploads, getattr(request.state, "sid", None))
+    return {"recordings": [asdict(clip) for clip in clips]}
+
+
+@router.get("/uploads/{clip_id}/audio")
+@router.head("/uploads/{clip_id}/audio")
+async def uploaded_clip_audio(clip_id: str, request: Request):
+    try:
+        path = resolve_upload_path(getattr(request.state, "sid", None), clip_id)
+    except UploadNotFound as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return stream_audio_file(path, request, path.name, "audio/wav")
+
+
+@router.delete("/uploads/{clip_id}")
+async def delete_uploaded_clip(clip_id: str, request: Request):
+    try:
+        delete_upload(getattr(request.state, "sid", None), clip_id)
+    except UploadNotFound as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return {"deleted": clip_id}
+
+
 class EvaluationRequest(BaseModel):
     model: str
 
@@ -133,10 +239,12 @@ class EmbeddingProjectionRequest(BaseModel):
     model: str
     reduction_method: str = "pca"
     n_components: int = 2
+    # The visitor's own `up_...` clips, placed on the same map as the dataset.
+    extra_recording_ids: list[str] = []
 
 
 @router.post("/embeddings")
-async def embedding_projection(request: EmbeddingProjectionRequest):
+async def embedding_projection(request: EmbeddingProjectionRequest, http_request: Request):
     """Feature 4 — 2D/3D embedding view of the whole demo dataset.
 
     Visualisation only: each point is the vector the detector's classification
@@ -157,9 +265,21 @@ async def embedding_projection(request: EmbeddingProjectionRequest):
     if request.n_components not in SUPPORTED_PROJECTION_COMPONENTS:
         raise HTTPException(status_code=422, detail="n_components must be 2 or 3.")
 
+    sid = getattr(http_request.state, "sid", None)
+    extra_clips = []
+    for clip_id in dict.fromkeys(request.extra_recording_ids):
+        if not is_upload_id(clip_id):
+            raise HTTPException(status_code=400, detail="extra_recording_ids takes user clip ids only.")
+        path = _resolve_clip(clip_id, http_request)
+        try:
+            name = get_upload(sid, clip_id).display_filename
+        except UploadNotFound as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        extra_clips.append((clip_id, name, path))
+
     try:
         return await project_dataset(
-            request.model, request.reduction_method, request.n_components
+            request.model, request.reduction_method, request.n_components, extra_clips
         )
     except DatasetUnavailable as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -175,7 +295,7 @@ class SilenceProbeRequest(BaseModel):
 
 
 @router.post("/silence-probe")
-async def silence_probe(request: SilenceProbeRequest):
+async def silence_probe(request: SilenceProbeRequest, http_request: Request):
     """Feature 2 — score the clip as submitted, trimmed, and silence-only.
 
     SRS DF-10..DF-12. Three forward passes on one clip: no dataset, no
@@ -186,10 +306,7 @@ async def silence_probe(request: SilenceProbeRequest):
         get_model_spec(request.model)
     except UnsupportedDeepfakeModel as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    try:
-        path = resolve_recording_path(request.recording_id)
-    except (DatasetUnavailable, RecordingNotFound) as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+    path = _resolve_clip(request.recording_id, http_request)
 
     audio_hash = await run_in_threadpool(file_sha256, path)
     cache_model_key = f"df-silence:{request.model}:{THRESHOLD_VERSION}:{SILENCE_TOP_DB}"
@@ -215,7 +332,7 @@ class SaliencyRequest(BaseModel):
 
 
 @router.post("/saliency")
-async def saliency(request: SaliencyRequest):
+async def saliency(request: SaliencyRequest, http_request: Request):
     """Feature 3 — waveform-aligned temporal attribution (SRS DF-14, DF-15).
 
     One forward and one backward pass over a single clip. Emits the shared
@@ -226,10 +343,7 @@ async def saliency(request: SaliencyRequest):
         get_model_spec(request.model)
     except UnsupportedDeepfakeModel as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    try:
-        path = resolve_recording_path(request.recording_id)
-    except (DatasetUnavailable, RecordingNotFound) as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+    path = _resolve_clip(request.recording_id, http_request)
 
     audio_hash = await run_in_threadpool(file_sha256, path)
     cache_model_key = f"df-saliency:{request.model}:{SALIENCY_METHOD}"
@@ -255,16 +369,13 @@ class RunRequest(BaseModel):
 
 
 @router.post("/run")
-async def run(request: RunRequest):
+async def run(request: RunRequest, http_request: Request):
     """Cache-through detection; key = model + threshold version + file hash."""
     try:
         get_model_spec(request.model)
     except UnsupportedDeepfakeModel as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    try:
-        path = resolve_recording_path(request.recording_id)
-    except (DatasetUnavailable, RecordingNotFound) as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+    path = _resolve_clip(request.recording_id, http_request)
 
     audio_hash = await run_in_threadpool(file_sha256, path)
     cache_model_key = f"df:{request.model}:{THRESHOLD_VERSION}"
