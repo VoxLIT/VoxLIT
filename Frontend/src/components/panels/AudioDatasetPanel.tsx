@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
-import { Upload, Search, Play, Pause, RefreshCw, HelpCircle } from "lucide-react";
+import { Upload, Search, Play, Pause, RefreshCw, HelpCircle, X } from "lucide-react";
 import { AudioUploader } from "../audio/AudioUploader";
 import { AudioDataTable } from "../audio/AudioDataTable";
 import { toast } from "sonner";
@@ -815,7 +815,7 @@ export const AudioDatasetPanel = ({
         
         {/* Search bar */}
         <div className="px-3 pt-2.5 pb-1">
-          <div className="relative border border-gray-200 rounded-lg px-2 py-1">
+          <div className="relative border border-gray-200 rounded-lg px-2 py-1 flex items-center">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
             <Tooltip>
               <TooltipTrigger asChild>
@@ -823,13 +823,23 @@ export const AudioDatasetPanel = ({
                   placeholder="Search audio files..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 h-6 text-xs bg-transparent border-0 focus:ring-0 rounded-md"
+                  className="pl-9 pr-6 h-6 text-xs bg-transparent border-0 focus:ring-0 rounded-md w-full"
                 />
               </TooltipTrigger>
               <TooltipContent>
                 <p>Search by filename or any metadata field</p>
               </TooltipContent>
             </Tooltip>
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 rounded-sm"
+                title="Clear search"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
           </div>
         </div>
       </div>
