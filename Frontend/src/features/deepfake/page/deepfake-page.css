@@ -1,0 +1,426 @@
+/* Audio Deepfake Detection page — its own look, scoped to .df-page so no
+   other task (or the shared shadcn theme) is affected. */
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap");
+
+.df-page {
+  /* shadcn tokens, re-pointed for this page only so Tooltip, Select etc. match */
+  --background: 220 35% 7%;
+  --foreground: 220 25% 92%;
+  --card: 220 28% 11%;
+  --card-foreground: 220 25% 92%;
+  --popover: 220 28% 12%;
+  --popover-foreground: 220 25% 92%;
+  --primary: 215 89% 66%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 20% 17%;
+  --secondary-foreground: 220 25% 92%;
+  --muted: 220 20% 15%;
+  --muted-foreground: 218 14% 66%;
+  --accent: 215 30% 22%;
+  --accent-foreground: 220 25% 92%;
+  --destructive: 358 75% 59%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 220 18% 20%;
+  --input: 220 18% 20%;
+  --ring: 215 89% 66%;
+
+  --df-real: #5b9cf6;
+  --df-mid: #8b97ab;
+  --df-fake: #e5484d;
+  --df-warn: #d4a72c;
+  --df-accent: #3b7ddd;
+  --df-accent-hover: #4a8cec;
+
+  /* surfaces, so components can say what a colour is for rather than what it is */
+  --df-canvas: #0b0f17;
+  --df-well: #090d14;
+  --df-panel: rgba(17, 23, 34, 0.98);
+  --df-header: rgba(11, 15, 23, 0.85);
+  --df-marker: #e6eaf2;
+
+  background: var(--df-canvas);
+  transition: background-color 0.4s ease, color 0.4s ease;
+  color: hsl(var(--foreground));
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: dark;
+}
+
+.df-page .font-display {
+  font-family: "Space Grotesk", Inter, sans-serif;
+  letter-spacing: -0.02em;
+}
+.df-page .font-mono {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Slowly drifting aurora behind the whole page. */
+.df-aurora {
+  position: fixed;
+  inset: -20vmax;
+  z-index: 0;
+  pointer-events: none;
+  /* a single, faint top-lit wash — no drifting colour blobs */
+  background: radial-gradient(60vmax 35vmax at 50% 0%, rgba(59, 125, 221, 0.08), transparent 70%);
+}
+.df-grid {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.03) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse at 50% 30%, black 30%, transparent 75%);
+}
+
+/* Card surface. */
+.df-glass {
+  background: #111722;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px -20px rgba(0, 0, 0, 0.6);
+}
+
+/* Rotating conic border — used on the hover popup and the verdict card. */
+.df-glow-border {
+  position: relative;
+  isolation: isolate;
+}
+.df-glow-border::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--df-accent);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+/* Hover popup: a plain hairline. */
+.df-popup-border {
+  border-radius: 1rem;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 16px 40px -12px rgba(0, 0, 0, 0.6);
+}
+
+/* Emphasised words in headings — a single accent colour. */
+.df-gradient-text {
+  color: var(--df-real);
+}
+
+/* Primary button, progress bars and small legend swatches. */
+.df-page .df-primary-btn {
+  background: var(--df-accent);
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+.df-page .df-primary-btn:not(:disabled):hover { background: var(--df-accent-hover); }
+.df-page .df-accent-bar { background: var(--df-accent); }
+.df-page .df-heat-swatch { background: linear-gradient(to bottom, var(--df-fake), var(--df-warn)); }
+
+/* Embedding map points: a gentle idle float, and ripples on the selection. */
+.df-float {
+  animation: df-float 5s ease-in-out infinite;
+  transform-box: fill-box;
+}
+@keyframes df-float {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(0, -3px); }
+}
+.df-ripple {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: df-ripple 2.2s cubic-bezier(0.2, 0.7, 0.3, 1) infinite;
+}
+.df-ripple-delay { animation-delay: 1.1s; }
+@keyframes df-ripple {
+  0% { transform: scale(1); opacity: 0.9; }
+  100% { transform: scale(3.2); opacity: 0; }
+}
+.df-twinkle {
+  animation: df-twinkle 4s ease-in-out infinite;
+}
+@keyframes df-twinkle {
+  0%, 100% { opacity: 0.15; }
+  50% { opacity: 0.7; }
+}
+
+/* Scanner sweep while the detector is listening. */
+.df-scan {
+  animation: df-scan 1.6s ease-in-out infinite;
+}
+@keyframes df-scan {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.df-page input[type="range"].df-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  width: 100%;
+}
+.df-page input[type="range"].df-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--df-real), var(--df-mid), var(--df-fake));
+}
+.df-page input[type="range"].df-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--df-real), var(--df-mid), var(--df-fake));
+}
+.df-page input[type="range"].df-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  margin-top: -7px;
+  height: 20px;
+  width: 20px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.25), 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: grab;
+}
+.df-page input[type="range"].df-range::-moz-range-thumb {
+  height: 20px;
+  width: 20px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.25), 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: grab;
+}
+.df-page input[type="range"].df-range:focus-visible {
+  outline: 2px solid var(--df-accent);
+  outline-offset: 6px;
+  border-radius: 999px;
+}
+
+/* Hero illustrations: a pulse running out along each waveform, a scan line
+   over the machine head, softly breathing / blinking accents. */
+.df-art-pulse {
+  stroke-dasharray: 8 92;
+  animation: df-art-pulse 2.8s linear infinite;
+}
+@keyframes df-art-pulse {
+  from { stroke-dashoffset: 8; }
+  to { stroke-dashoffset: -92; }
+}
+.df-art-scan {
+  animation: df-art-scan 3.6s ease-in-out infinite;
+}
+@keyframes df-art-scan {
+  0% { transform: translateY(0); opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: translateY(260px); opacity: 0; }
+}
+.df-art-breathe {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: df-art-breathe 4s ease-in-out infinite;
+}
+@keyframes df-art-breathe {
+  0%, 100% { transform: scale(0.9); opacity: 0.7; }
+  50% { transform: scale(1.1); opacity: 1; }
+}
+.df-art-blink { animation: df-art-blink 2.4s steps(1) infinite; }
+@keyframes df-art-blink {
+  0%, 70% { opacity: 1; }
+  71%, 100% { opacity: 0.25; }
+}
+.df-art-node { animation: df-art-node 3.2s ease-in-out infinite; }
+@keyframes df-art-node {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .df-art-pulse, .df-art-scan, .df-art-breathe, .df-art-blink, .df-art-node,
+  .df-aurora, .df-float, .df-ripple, .df-twinkle, .df-scan, .df-glow-border::before {
+    animation: none !important;
+  }
+}
+
+/* ── Semantic surfaces (both themes read the variables above) ─────────────── */
+.df-page .df-well { background: var(--df-well); }
+.df-page .df-panel { background: var(--df-panel); }
+.df-page .df-header { background: var(--df-header); }
+.df-page .df-canvas { background: var(--df-canvas); }
+.df-page .df-marker { background: var(--df-marker); }
+.df-page .df-image-fade {
+  background: linear-gradient(to top, var(--df-canvas), color-mix(in srgb, var(--df-canvas) 30%, transparent), transparent);
+}
+/* Active segment of a segmented control. */
+.df-page .df-pill { background: #ffffff; }
+/* The big round play button. */
+.df-page .df-play {
+  background: var(--df-accent);
+  color: #ffffff;
+  box-shadow: 0 4px 14px -4px rgba(0, 0, 0, 0.5);
+}
+.df-page .df-playhead {
+  background: var(--df-marker);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+.df-page .df-overlay-chip { background: rgba(0, 0, 0, 0.5); }
+
+/* ── Professional hue mapping ───────────────────────────────────────────────
+   Components use Tailwind's cyan / violet / rose for "real", "accent" and
+   "synthetic". On this page those read as calm blue, slate and red instead. */
+.df-page .text-cyan-200,
+.df-page .text-cyan-300,
+.df-page .text-cyan-300\/80 { color: #8fb9f8; }
+.df-page .text-violet-300 { color: #9fb0c8; }
+.df-page .text-rose-200,
+.df-page .text-rose-300,
+.df-page .hover\:text-rose-300:hover { color: #f08a8d; }
+.df-page .bg-cyan-400 { background-color: var(--df-real); }
+.df-page .bg-cyan-300\/5 { background-color: color-mix(in srgb, var(--df-real) 5%, transparent); }
+.df-page .bg-cyan-400\/10 { background-color: color-mix(in srgb, var(--df-real) 10%, transparent); }
+.df-page .bg-rose-400\/10,
+.df-page .bg-rose-500\/10,
+.df-page .hover\:bg-rose-400\/10:hover { background-color: color-mix(in srgb, var(--df-fake) 10%, transparent); }
+.df-page .bg-rose-400\/30 { background-color: color-mix(in srgb, var(--df-fake) 30%, transparent); }
+.df-page .hover\:bg-violet-400\/10:hover { background-color: color-mix(in srgb, var(--df-real) 10%, transparent); }
+.df-page .border-cyan-300 { border-color: var(--df-real); }
+.df-page .border-cyan-300\/70 { border-color: color-mix(in srgb, var(--df-real) 70%, transparent); }
+.df-page .focus\:border-cyan-300\/60:focus { border-color: color-mix(in srgb, var(--df-real) 60%, transparent); }
+.df-page .border-rose-400\/30 { border-color: color-mix(in srgb, var(--df-fake) 30%, transparent); }
+.df-page .focus-visible\:ring-cyan-300:focus-visible { --tw-ring-color: var(--df-accent); }
+.df-page .ring-cyan-300\/30 { --tw-ring-color: color-mix(in srgb, var(--df-real) 30%, transparent); }
+.df-page .ring-cyan-300\/40 { --tw-ring-color: color-mix(in srgb, var(--df-real) 40%, transparent); }
+.df-page .ring-rose-300\/30 { --tw-ring-color: color-mix(in srgb, var(--df-fake) 30%, transparent); }
+.df-page .ring-rose-300\/40 { --tw-ring-color: color-mix(in srgb, var(--df-fake) 40%, transparent); }
+.df-page .ring-violet-300\/50 { --tw-ring-color: color-mix(in srgb, var(--df-accent) 50%, transparent); }
+.df-page .ring-violet-300\/70 { --tw-ring-color: color-mix(in srgb, var(--df-accent) 70%, transparent); }
+
+/* Theme reveal: the View Transitions API crossfades by default; the toggle
+   animates a growing circle instead, so switch the default off. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Light theme. The same page, in daylight: white glass on a pale lilac-grey
+   canvas, deeper shades of the score colours (neon cyan and rose wash out on
+   white), and ink-coloured markers in place of white ones.
+
+   Most components are written with the dark theme's Tailwind classes; rather
+   than thread a theme through every className, those classes are re-pointed
+   here, scoped to this page only.
+   ════════════════════════════════════════════════════════════════════════════ */
+.df-page[data-theme="light"] {
+  --background: 220 14% 97%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 219 71% 45%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 14% 93%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 220 14% 94%;
+  --muted-foreground: 215 19% 35%;
+  --accent: 220 14% 93%;
+  --accent-foreground: 222 47% 11%;
+  --destructive: 0 61% 48%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 220 13% 87%;
+  --input: 220 13% 87%;
+  --ring: 219 71% 45%;
+
+  --df-real: #2159c4;
+  --df-mid: #64748b;
+  --df-fake: #c53030;
+  --df-warn: #b7791f;
+  --df-accent: #2159c4;
+  --df-accent-hover: #1b4ca8;
+
+  --df-canvas: #f6f7f9;
+  --df-well: #eef0f4;
+  --df-panel: rgba(255, 255, 255, 0.99);
+  --df-header: rgba(246, 247, 249, 0.9);
+  --df-marker: #0f172a;
+
+  color-scheme: light;
+}
+
+.df-page[data-theme="light"] .df-aurora {
+  background: radial-gradient(60vmax 35vmax at 50% 0%, rgba(33, 89, 196, 0.05), transparent 70%);
+}
+.df-page[data-theme="light"] .df-grid {
+  background-image:
+    linear-gradient(rgba(15, 23, 42, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.03) 1px, transparent 1px);
+}
+.df-page[data-theme="light"] .df-glass {
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.09);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 8px 24px -16px rgba(15, 23, 42, 0.15);
+}
+.df-page[data-theme="light"] .df-pill {
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(15, 23, 42, 0.06);
+}
+.df-page[data-theme="light"] .df-play {
+  box-shadow: 0 4px 12px -4px rgba(15, 23, 42, 0.35);
+}
+.df-page[data-theme="light"] .df-popup-border {
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.1), 0 16px 40px -12px rgba(15, 23, 42, 0.25);
+}
+.df-page[data-theme="light"] .df-overlay-chip { background: rgba(255, 255, 255, 0.85); }
+.df-page[data-theme="light"] .df-image-fade {
+  /* only behind the caption strip — a full-height white wash would bleach the photo */
+  background: linear-gradient(to top, rgba(255, 255, 255, 0.94) 0%, rgba(255, 255, 255, 0.6) 22%, transparent 48%);
+}
+/* The star map stays a night sky in both themes only in 3D; in 2D it becomes paper. */
+.df-page[data-theme="light"] .df-twinkle { fill: #94a3b8; }
+
+/* text */
+.df-page[data-theme="light"] .text-white,
+.df-page[data-theme="light"] .hover\:text-white:hover { color: #0f172a; }
+.df-page[data-theme="light"] .text-slate-200 { color: #1e293b; }
+.df-page[data-theme="light"] .text-slate-300 { color: #334155; }
+.df-page[data-theme="light"] .text-slate-400 { color: #475569; }
+.df-page[data-theme="light"] .text-slate-500 { color: #64748b; }
+.df-page[data-theme="light"] .placeholder\:text-slate-500::placeholder { color: #94a3b8; }
+.df-page[data-theme="light"] .text-cyan-200,
+.df-page[data-theme="light"] .text-cyan-300,
+.df-page[data-theme="light"] .text-cyan-300\/80 { color: #1e4fae; }
+.df-page[data-theme="light"] .text-violet-300 { color: #475569; }
+.df-page[data-theme="light"] .text-rose-200,
+.df-page[data-theme="light"] .text-rose-300,
+.df-page[data-theme="light"] .hover\:text-rose-300:hover { color: #b42318; }
+.df-page[data-theme="light"] .text-emerald-200,
+.df-page[data-theme="light"] .text-emerald-300 { color: #047857; }
+.df-page[data-theme="light"] .text-amber-200,
+.df-page[data-theme="light"] .text-amber-300 { color: #b45309; }
+/* active segments keep dark text on their white pill */
+.df-page[data-theme="light"] .aria-checked\:text-slate-950[aria-checked="true"] { color: #020617; }
+.df-page[data-theme="light"] .fill-white { fill: #0f172a; }
+.df-page[data-theme="light"] .fill-slate-300,
+.df-page[data-theme="light"] .fill-slate-400 { fill: #475569; }
+
+/* translucent white washes become translucent ink */
+.df-page[data-theme="light"] .bg-white\/\[0\.02\] { background-color: rgba(15, 23, 42, 0.02); }
+.df-page[data-theme="light"] .bg-white\/\[0\.03\] { background-color: rgba(255, 255, 255, 0.6); }
+.df-page[data-theme="light"] .bg-white\/\[0\.035\] { background-color: rgba(255, 255, 255, 0.7); }
+.df-page[data-theme="light"] .bg-white\/5 { background-color: rgba(15, 23, 42, 0.05); }
+.df-page[data-theme="light"] .bg-white\/10 { background-color: rgba(15, 23, 42, 0.07); }
+.df-page[data-theme="light"] .hover\:bg-white\/5:hover { background-color: rgba(15, 23, 42, 0.05); }
+.df-page[data-theme="light"] .hover\:bg-white\/10:hover { background-color: rgba(15, 23, 42, 0.07); }
+.df-page[data-theme="light"] .hover\:bg-white\/20:hover { background-color: rgba(15, 23, 42, 0.12); }
+.df-page[data-theme="light"] .hover\:bg-white\/\[0\.07\]:hover { background-color: #ffffff; }
+.df-page[data-theme="light"] .bg-white\/70 { background-color: rgba(15, 23, 42, 0.7); }
+
+/* hairlines */
+.df-page[data-theme="light"] .ring-white\/10 { --tw-ring-color: rgba(15, 23, 42, 0.1); }
+.df-page[data-theme="light"] .ring-white\/15 { --tw-ring-color: rgba(15, 23, 42, 0.14); }
+.df-page[data-theme="light"] .ring-white\/20 { --tw-ring-color: rgba(15, 23, 42, 0.18); }
+.df-page[data-theme="light"] .border-white\/10 { border-color: rgba(15, 23, 42, 0.1); }
+.df-page[data-theme="light"] .border-white\/20 { border-color: rgba(15, 23, 42, 0.2); }
+.df-page[data-theme="light"] .border-white\/60 { border-color: rgba(15, 23, 42, 0.55); }
+.df-page[data-theme="light"] .via-white\/20 { --tw-gradient-stops: var(--tw-gradient-from), rgba(15, 23, 42, 0.15), var(--tw-gradient-to); }

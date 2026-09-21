@@ -127,6 +127,45 @@ def test_the_models_own_window_wins_when_it_is_tighter(clip):
     assert seconds == pytest.approx(1.5, abs=0.01)
 
 
+class _LoudHalfSpectrogramModel(torch.nn.Module):
+    """Spectrogram-in twin of _LoudHalfModel: only the clip's second half counts."""
+
+    def __init__(self, real_frames: int):
+        super().__init__()
+        self.real_frames = real_frames
+
+    def zero_grad(self, set_to_none: bool = True):  # noqa: D102
+        pass
+
+    def forward(self, input_values):
+        half = self.real_frames // 2
+        spoof = (input_values[:, half : self.real_frames] ** 2).sum()
+        return SimpleNamespace(logits=torch.stack([torch.zeros_like(spoof), spoof]).unsqueeze(0))
+
+
+def test_spectrogram_padding_is_not_mistaken_for_audio(clip):
+    """Model B (AST) pads every clip to 10.24 s of frames. A 4 s clip must map
+    its OWN frames onto its 4 s, not have the padding stretched over it."""
+    from transformers import ASTFeatureExtractor
+
+    real_frames = saliency._real_frame_count(SAMPLE_RATE * 4, SAMPLE_RATE)
+    adapter = SimpleNamespace(
+        model=_LoudHalfSpectrogramModel(real_frames),
+        spoof_index=1,
+        analysis_window_seconds=10.24,
+        feature_extractor=ASTFeatureExtractor(),
+        device="cpu",
+    )
+
+    attribution, seconds = saliency._attribution_over_time(adapter, clip, 30.0)
+
+    assert seconds == pytest.approx(4.0, abs=0.01)
+    assert attribution.size == real_frames
+    half = attribution.size // 2
+    assert attribution[:half].sum() == 0.0
+    assert attribution[half:].sum() > 0.0
+
+
 # --- endpoint -------------------------------------------------------------
 
 PROTOCOL_ID = "LA_E_5000001"
