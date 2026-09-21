@@ -9,6 +9,7 @@ interface ClusterSummaryListProps {
   clusterColorMap: Record<string, string>;
   focusedClusterId?: string | null;
   onClusterFocusChange?: (clusterId: string | null) => void;
+  resolveLabel?: (id: string) => string;
 }
 
 const formatScore = (value: number) => value.toFixed(4);
@@ -40,7 +41,9 @@ export const ClusterSummaryList = ({
   clusterColorMap,
   focusedClusterId,
   onClusterFocusChange,
+  resolveLabel,
 }: ClusterSummaryListProps) => {
+  const resolve = resolveLabel ?? ((id: string) => id);
   const sortedClusters = useMemo(
     () =>
       [...clusterSummaries].sort(
@@ -133,7 +136,7 @@ export const ClusterSummaryList = ({
                     </Tooltip>
                   </span>
                   <span className="flex items-center gap-1">
-                    Representative clip: {cluster.representative_label}
+                    Representative clip: {resolve(cluster.representative_label)}
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <HelpCircle
@@ -147,7 +150,7 @@ export const ClusterSummaryList = ({
                     </Tooltip>
                   </span>
                 </div>
-                <p className="truncate text-muted-foreground">{cluster.member_labels.join(", ")}</p>
+                <p className="truncate text-muted-foreground">{cluster.member_labels.map(resolve).join(", ")}</p>
               </button>
             );
           })}

@@ -106,8 +106,8 @@ export const ClusterAssignmentResults = ({ selectedFile }: PredictionResultsProp
           </span>
 
           <span className="text-muted-foreground">Nearest audio clip</span>
-          <span className="truncate">
-            {stats.nearest_label}
+          <span className="truncate" title={snapshot.nearestDisplayLabel || stats.nearest_label}>
+            {snapshot.nearestDisplayLabel || stats.nearest_label}
             {!stats.nearest_in_same_cluster && (
               <Badge variant="outline" className="ml-1.5 text-[9px]">different cluster</Badge>
             )}

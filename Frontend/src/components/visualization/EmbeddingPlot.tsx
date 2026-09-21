@@ -15,6 +15,7 @@ import { ZoomIn, ZoomOut, RotateCcw, Layers3, Target } from "lucide-react";
 
 export interface ExternalEmbeddingPoint {
   label: string;
+  displayLabel?: string;
   coordinates: number[];
   color: string;
   hoverExtra?: string;
@@ -60,6 +61,21 @@ const mixWithWhite = (color: string, amount: number): string => {
   }
   const mix = (channel: number) => Math.round(channel + (255 - channel) * amount);
   return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+};
+
+const normalizeLabel = (s: string) => {
+  const base = s.split(/[/\\]/).pop() || s;
+  return base.replace(/\.[^/.]+$/, "").toLowerCase();
+};
+
+const matchesSelectedFile = (label: string, file?: string | null): boolean => {
+  if (!file) return false;
+  if (label === file) return true;
+  const lNorm = normalizeLabel(label);
+  const fNorm = normalizeLabel(file);
+  if (lNorm === fNorm) return true;
+  if (lNorm.includes(fNorm) || fNorm.includes(lNorm)) return true;
+  return false;
 };
 
 interface EmbeddingPlotProps {
@@ -668,12 +684,22 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
       z: z && z.length > 0 ? [Math.min(...z) * 1.1, Math.max(...z) * 1.1] as [number, number] : [0, 0] as [number, number]
     } : { x: [0, 0] as [number, number], y: [0, 0] as [number, number], z: [0, 0] as [number, number] };
 
-    // Create marker sizes based on selection
-    const markerSizes = text.map(filename => {
+    const isPointSelected = (label: string, index?: number): boolean => {
       if (isExternal) {
-        return externalSelectedLabels?.includes(filename) ? 13 : 7.5;
+        const ext = index !== undefined && externalData ? externalData[index] : undefined;
+        return (
+          (externalSelectedLabels?.includes(label) ?? false) ||
+          matchesSelectedFile(label, selectedFile) ||
+          (ext?.displayLabel ? matchesSelectedFile(ext.displayLabel, selectedFile) : false)
+        );
       }
-      if (selectedFile === filename) return 13; // Currently selected file (medium-large)
+      return selectedFile === label || matchesSelectedFile(label, selectedFile);
+    };
+
+    // Create marker sizes based on selection
+    const markerSizes = text.map((filename, index) => {
+      if (isPointSelected(filename, index)) return is3D ? (isExternal ? 7.5 : 6) : 13;
+      if (isExternal) return 7.5;
       if (selectedByAngle.includes(filename)) return 8; // Angle range selected (medium)
       return 6; // Default (smaller)
     });
@@ -684,39 +710,30 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
       if (isExternal) {
         return externalData![index].color;
       }
-      if (selectedFile === filename) return colors[index] || '#3b82f6';
+      if (isPointSelected(filename, index)) return colors[index] || '#3b82f6';
       if (selectedByAngle.includes(filename)) return '#ef4444'; // Red for angle selected
       return '#3b82f6'; // Blue for all other points
     });
 
     // Create marker line widths and colors (black outline for selected points)
-    const markerLineWidths = text.map(filename => {
-      if (isExternal) {
-        return externalSelectedLabels?.includes(filename) ? 2.5 : 0;
-      }
-      if (selectedFile === filename) return 2.5;
-      return 0;
+    const markerLineWidths = text.map((filename, index) => {
+      return isPointSelected(filename, index) ? 2.5 : 0;
     });
 
-    const markerLineColors = text.map(filename => {
-      if (isExternal) {
-        return externalSelectedLabels?.includes(filename) ? '#000000' : 'transparent';
-      }
-      if (selectedFile === filename) return '#000000';
-      return 'transparent';
+    const markerLineColors = text.map((filename, index) => {
+      return isPointSelected(filename, index) ? '#000000' : 'transparent';
     });
 
     // Create marker opacities based on selection (selected point is 1.0, unselected points dimmed to 0.7 so selected is brighter)
     const hasSelection = isExternal
-      ? (externalSelectedLabels?.length ?? 0) > 0
-      : selectedFile || selectedByAngle.length > 0;
+      ? ((externalSelectedLabels?.length ?? 0) > 0 || !!selectedFile)
+      : (!!selectedFile || selectedByAngle.length > 0);
     const markerOpacities = text.map((filename, index) => {
+      if (isPointSelected(filename, index)) return 1.0;
       if (isExternal) {
-        if (externalSelectedLabels?.includes(filename)) return 1.0;
         return hasSelection ? 0.7 : 0.85;
       }
       if (!hasSelection) return 0.8; // Default opacity when no selection
-      if (selectedFile === filename) return 1.0; // Full opacity for selected file
       if (selectedByAngle.includes(filename)) return 0.9; // High opacity for angle selected
       // Different transparency for 2D vs 3D unselected points
       return is3D ? 0.1 : 0.45; // More transparent in 3D, slightly visible in 2D
@@ -727,7 +744,10 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
 
     // Create hover text with angle information
     const hoverText = text.map((filename, index) => {
-      let baseText = `<b>${filename}</b>`;
+      const displayName = isExternal && externalData![index]?.displayLabel
+        ? externalData![index].displayLabel
+        : filename;
+      let baseText = `<b>${displayName}</b>`;
 
       if (isExternal && externalData![index].hoverExtra) {
         baseText += `<br>${externalData![index].hoverExtra}`;
@@ -841,15 +861,11 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
     // In 3D, scatter3d requires scalar marker.line.width, so render a dedicated highlight trace for selected points
     if (is3D) {
       const selectedIndices = text
-        .map((filename, index) => {
-          const isSelected = isExternal
-            ? externalSelectedLabels?.includes(filename)
-            : selectedFile === filename;
-          return isSelected ? index : -1;
-        })
+        .map((filename, index) => (isPointSelected(filename) ? index : -1))
         .filter(idx => idx !== -1);
 
       if (selectedIndices.length > 0) {
+        const highlightSize = isExternal ? 6.5 : 5.5;
         const highlightTrace: any = {
           x: selectedIndices.map(i => x[i]),
           y: selectedIndices.map(i => y[i]),
@@ -857,10 +873,10 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
           mode: 'markers',
           type: 'scatter3d',
           marker: {
-            size: 13,
+            size: highlightSize,
             color: selectedIndices.map(i => isExternal ? externalData![i].color : (colors[i] || '#3b82f6')),
             line: {
-              width: 3,
+              width: 2.5,
               color: '#000000',
             },
             opacity: 1.0,
@@ -895,21 +911,23 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
   // trace's point order for isExternal is exactly `externalData`'s order.
   const focusStyles = useMemo(() => {
     if (!isExternal || !externalData) return null;
-    const hasSelection = (externalSelectedLabels?.length ?? 0) > 0;
+    const hasSelection = (externalSelectedLabels?.length ?? 0) > 0 || !!selectedFile;
     const colors = externalData.map((point) => {
-      if (externalSelectedLabels?.includes(point.label)) return point.color;
+      const isSelected = (externalSelectedLabels?.includes(point.label) ?? false) || matchesSelectedFile(point.label, selectedFile);
+      if (isSelected) return point.color;
       if (focusedClusterId && point.clusterId !== focusedClusterId) {
         return mixWithWhite(point.color, 0.7);
       }
       return point.color;
     });
     const opacities = externalData.map((point) => {
-      if (externalSelectedLabels?.includes(point.label)) return 1.0;
+      const isSelected = (externalSelectedLabels?.includes(point.label) ?? false) || matchesSelectedFile(point.label, selectedFile);
+      if (isSelected) return 1.0;
       if (focusedClusterId && point.clusterId !== focusedClusterId) return 0.55;
       return hasSelection ? 0.7 : 0.85;
     });
     return { colors, opacities };
-  }, [isExternal, externalData, externalSelectedLabels, focusedClusterId]);
+  }, [isExternal, externalData, externalSelectedLabels, selectedFile, focusedClusterId]);
 
   // Always mirrors the latest focusStyles into a ref, read by the stable
   // (never-recreated) applyFocusStyles callback below -- assigned directly

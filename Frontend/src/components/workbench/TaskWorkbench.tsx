@@ -714,7 +714,7 @@ export const TaskWorkbench = ({ task }: TaskWorkbenchProps) => {
     setLocalPreview(null);
     setSelectedFile(file);
     // Sync embedding selection with audio dataset selection
-    setSelectedEmbeddingFile(file.filename);
+    setSelectedEmbeddingFile(file.file_id || file.filename);
   };
 
   const handleEmbeddingSelection = (filename: string) => {
@@ -737,9 +737,12 @@ export const TaskWorkbench = ({ task }: TaskWorkbenchProps) => {
 
     // For dataset files, create a file-like object for the UI
     // The AudioDatasetPanel should handle highlighting the corresponding row
+    const rec = task.id === 'verification'
+      ? verificationRecordings.find(r => r.recording_id === effectiveId)
+      : undefined;
     const fileLike: UploadedFile = {
       file_id: effectiveId,
-      filename: effectiveId,
+      filename: rec?.display_filename ?? effectiveId,
       file_path: effectiveId,
       message: "Selected from embeddings"
     };

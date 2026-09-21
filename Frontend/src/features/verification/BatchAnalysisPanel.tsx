@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useEmbedding } from "@/contexts/EmbeddingContext";
 import { VERIFICATION_DEMO_DATASET_ID } from "@/tasks/registry";
-import type { UploadedFile } from "@/tasks/types";
+import type { UploadedFile, DatasetRecordingRef } from "@/tasks/types";
 import { ClusterSummaryList } from "./ClusterSummaryList";
 import { PairComparisonCard } from "./PairComparisonCard";
 import { buildClusterColorMap } from "./clusterColors";
@@ -33,6 +33,7 @@ interface BatchAnalysisPanelProps {
   /** Currently selected recording (table row click or graph point click) --
    *  drives cluster-based saliency for whichever recording is selected. */
   selectedFile: UploadedFile | null;
+  datasetRecordings?: DatasetRecordingRef[];
   onReprojectHandlerChange: (handler: ((method: string, n: number) => void) | null) => void;
   onLabelResolverChange: (resolver: ((label: string) => string | undefined) | null) => void;
 }
@@ -54,9 +55,16 @@ export const BatchAnalysisPanel = ({
   selectedBatchIds,
   pairSelection,
   selectedFile,
+  datasetRecordings,
   onReprojectHandlerChange,
   onLabelResolverChange,
 }: BatchAnalysisPanelProps) => {
+  const resolveRecordingLabel = useCallback(
+    (id: string): string =>
+      datasetRecordings?.find((r) => r.recording_id === id)?.display_filename ?? id,
+    [datasetRecordings]
+  );
+
   const { setEmbeddingDataDirect, focusedClusterId, setFocusedClusterId } = useEmbedding();
 
   const [batchResult, setBatchResult] = useState<BatchAnalysisResponse | null>(null);
@@ -159,6 +167,7 @@ export const BatchAnalysisPanel = ({
     clusterAssignmentStore.publish({
       fileId: selectedFile.file_id,
       stats,
+      nearestDisplayLabel: resolveRecordingLabel(stats.nearest_label),
       clusterSize: clusterSummary?.member_count ?? 1,
       modelLabel: batchResult.model_label,
       clusteringDistanceThreshold: batchResult.clustering_distance_threshold,
@@ -166,7 +175,7 @@ export const BatchAnalysisPanel = ({
       groundTruthGroup: batchResult.ground_truth_groups?.[index] ?? null,
       groundTruthAvailable: batchResult.ground_truth_available,
     });
-  }, [batchResult, selectedFile, submittedIds]);
+  }, [batchResult, selectedFile, submittedIds, resolveRecordingLabel]);
 
   useEffect(() => {
     return () => clusterAssignmentStore.publish(null);
@@ -321,6 +330,7 @@ export const BatchAnalysisPanel = ({
           effective_components: projection.effective_components,
           reduced_embeddings: batchResult.labels.map((label, i) => ({
             filename: label,
+            displayFilename: resolveRecordingLabel(label),
             coordinates: projection.coordinates[i],
             color: clusterColorMap[batchResult.cluster_labels[i]] ?? "#3b82f6",
             hoverExtra: `${batchResult.cluster_labels[i]} • fit ${batchResult.cluster_fit_scores[i].toFixed(2)}`,
@@ -337,7 +347,7 @@ export const BatchAnalysisPanel = ({
         }
       }
     },
-    [batchResult, originalDataset, setEmbeddingDataDirect]
+    [batchResult, originalDataset, setEmbeddingDataDirect, resolveRecordingLabel]
   );
 
   // Register the reproject handler with TaskWorkbench so EmbeddingPanel's own
@@ -542,12 +552,18 @@ export const BatchAnalysisPanel = ({
 
       {batchResult && (
         <>
-          <PairComparisonCard selectedLabels={pairSelection} batchResult={batchResult} labelToIndex={labelToIndex} />
+          <PairComparisonCard
+            selectedLabels={pairSelection}
+            batchResult={batchResult}
+            labelToIndex={labelToIndex}
+            resolveLabel={resolveRecordingLabel}
+          />
           <ClusterSummaryList
             clusterSummaries={batchResult.cluster_summaries}
             clusterColorMap={clusterColorMap}
             focusedClusterId={focusedClusterId}
             onClusterFocusChange={setFocusedClusterId}
+            resolveLabel={resolveRecordingLabel}
           />
         </>
       )}

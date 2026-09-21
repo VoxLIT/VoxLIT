@@ -792,6 +792,7 @@ export const SpeakerVerificationWorkbench = ({
               selectedBatchIds={selectedBatchIds}
               pairSelection={pairSelection}
               selectedFile={selectedFile}
+              datasetRecordings={datasetRecordings}
               onReprojectHandlerChange={onReprojectHandlerChange}
               onLabelResolverChange={onLabelResolverChange}
             />

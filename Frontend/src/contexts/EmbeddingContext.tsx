@@ -3,6 +3,8 @@ import { API_BASE } from '@/lib/api';
 
 export interface EmbeddingPoint {
   filename: string;
+  /** Human-readable filename for display/hover tooltips when filename is an internal id. */
+  displayFilename?: string;
   coordinates: number[];
   embedding?: number[];
   embedding_dim?: number;

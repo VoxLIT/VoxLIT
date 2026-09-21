@@ -11,6 +11,7 @@ import type { RecordingClusterStats } from "./batchTypes";
 export interface ClusterAssignmentSnapshot {
   fileId: string;
   stats: RecordingClusterStats;
+  nearestDisplayLabel?: string;
   clusterSize: number;
   modelLabel: string;
   clusteringDistanceThreshold: number;
