@@ -268,11 +268,6 @@ export const WaveformViewer = ({ audioUrl, isPlaying, onReady, onProgress, onFin
     }
   }, [isPlaying]);
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
 
   return (
     <Card className="p-3 border-gray-200 bg-white shadow-sm">
@@ -329,13 +324,9 @@ export const WaveformViewer = ({ audioUrl, isPlaying, onReady, onProgress, onFin
 
       {timelineBelow && <div className="mt-2">{timelineBelow}</div>}
 
-      {/* Time markers and controls */}
-      <div className="flex justify-between text-xs text-gray-600 mt-2">
-        <span>0:00</span>
-        <span className="text-center flex-1 italic">
-          {audioUrl ? 'Click waveform to seek' : 'Waveform will appear here'}
-        </span>
-        <span>{wavesurferRef.current ? formatTime(wavesurferRef.current.getDuration() || 0) : '0:00'}</span>
+      {/* Interaction hint */}
+      <div className="text-center text-xs text-muted-foreground mt-2 italic">
+        {audioUrl ? 'Click waveform to seek' : 'Waveform will appear here'}
       </div>
     
     </Card>

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
-import { Upload, Search, Play, Pause, RefreshCw, HelpCircle } from "lucide-react";
+import { Upload, Search, Play, Pause, RefreshCw, HelpCircle, X } from "lucide-react";
 import { AudioUploader } from "../audio/AudioUploader";
 import { AudioDataTable } from "../audio/AudioDataTable";
 import { toast } from "sonner";
@@ -75,6 +75,9 @@ interface AudioDatasetPanelProps {
    *  still being confirmed on page load -- suppresses a premature "no
    *  recordings" flash before restoration resolves. */
   isRestoringDataset?: boolean;
+  /** Verification-only: maps recording_id → cluster_id from the last batch
+   *  analysis result. Drives the Cluster column in the dataset table. */
+  clusterMap?: Record<string, string>;
 }
 
 export const AudioDatasetPanel = ({ 
@@ -100,6 +103,7 @@ export const AudioDatasetPanel = ({
   verificationUploadedCount,
   refreshToken,
   isRestoringDataset,
+  clusterMap,
 }: AudioDatasetPanelProps) => {
   const [selectedRow, setSelectedRow] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -742,9 +746,11 @@ export const AudioDatasetPanel = ({
   return (
     <TooltipProvider>
       <div className="h-full bg-panel-background flex flex-col">
-        <div className="bg-panel-header p-3 border-b border-border">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
+        <div className="bg-panel-header px-3 pt-3 pb-2 border-b border-border space-y-2">
+          {/* Header row: title + search + action buttons */}
+          <div className="flex items-center gap-2">
+            {/* Title + help icon */}
+            <div className="flex items-center gap-1.5 shrink-0">
               <h3 className="font-semibold text-foreground text-sm">Audio Dataset</h3>
               {isRestoringDataset && (
                 <Badge variant="outline" className="text-[10px] bg-muted animate-pulse">
@@ -761,11 +767,36 @@ export const AudioDatasetPanel = ({
                 </TooltipContent>
               </Tooltip>
             </div>
-            <div className="flex items-center gap-1.5">
+
+            {/* Inline search box */}
+            <div className="relative flex-1 border border-gray-200 rounded-lg px-2 py-0.5 flex items-center">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
+              <Input
+                placeholder="Search audio files..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-7 pr-6 h-6 text-xs bg-transparent border-0 focus:ring-0 rounded-md w-full"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 rounded-sm"
+                  title="Clear search"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+
+            {/* Right-side badges + buttons */}
+            <div className="flex items-center gap-1.5 shrink-0">
               <Badge variant="outline" className="text-[10px] bg-muted">
-                {selectionVariant === 'verification'
-                  ? `${verificationUploadedCount ?? 0} uploaded`
-                  : uploadedFiles ? `${uploadedFiles.length} uploaded` : "0 files"}
+                {tableRows.length > 0
+                  ? `${tableRows.length} recordings`
+                  : selectionVariant === 'verification'
+                    ? `${verificationUploadedCount ?? 0} uploaded`
+                    : uploadedFiles ? `${uploadedFiles.length} uploaded` : "0 files"}
               </Badge>
               {batchInferenceStatus === 'running' && batchInferenceQueue.length > 0 && (
                 <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/20">
@@ -800,41 +831,21 @@ export const AudioDatasetPanel = ({
                   <p>Reload dataset metadata and refresh the file list</p>
                 </TooltipContent>
               </Tooltip>
-            {!hideUploadControl && (
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/*,.flac,.wav,.mp3,.m4a"
-                multiple
-                onChange={handleFileSelect}
-                className="hidden"
-              />
-            )}
-          </div>
-        </div>
-        
-        {/* Search bar */}
-        <div className="px-3 pt-2.5 pb-1">
-          <div className="relative border border-gray-200 rounded-lg px-2 py-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Input
-                  placeholder="Search audio files..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 h-6 text-xs bg-transparent border-0 focus:ring-0 rounded-md"
+              {!hideUploadControl && (
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="audio/*,.flac,.wav,.mp3,.m4a"
+                  multiple
+                  onChange={handleFileSelect}
+                  className="hidden"
                 />
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Search by filename or any metadata field</p>
-              </TooltipContent>
-            </Tooltip>
+              )}
+            </div>
           </div>
         </div>
-      </div>
       
-      <div className="flex-1 min-h-0 overflow-hidden px-3 pb-3">
+      <div className="flex-1 min-h-0 overflow-hidden px-3 pb-3 pt-3">
         <Card className="h-full rounded-lg">
           <CardContent className="p-0 h-full">
             <AudioDataTable
@@ -854,6 +865,7 @@ export const AudioDatasetPanel = ({
               checkedIds={checkedIds}
               onCheckedIdsChange={onCheckedIdsChange}
               maxSelectable={maxSelectable}
+              clusterMap={clusterMap}
             />
           </CardContent>
         </Card>

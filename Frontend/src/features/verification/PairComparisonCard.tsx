@@ -8,6 +8,7 @@ interface PairComparisonCardProps {
   selectedLabels: string[];
   batchResult: BatchAnalysisResponse;
   labelToIndex: Map<string, number>;
+  resolveLabel?: (id: string) => string;
 }
 
 const formatScore = (value: number) => value.toFixed(4);
@@ -33,7 +34,8 @@ const computePairDetails = (batchResult: BatchAnalysisResponse, indexA: number, 
   };
 };
 
-export const PairComparisonCard = ({ selectedLabels, batchResult, labelToIndex }: PairComparisonCardProps) => {
+export const PairComparisonCard = ({ selectedLabels, batchResult, labelToIndex, resolveLabel }: PairComparisonCardProps) => {
+  const resolve = resolveLabel ?? ((id: string) => id);
   const hasPair = selectedLabels.length === 2;
   const indexA = hasPair ? labelToIndex.get(selectedLabels[0]) : undefined;
   const indexB = hasPair ? labelToIndex.get(selectedLabels[1]) : undefined;
@@ -58,10 +60,10 @@ export const PairComparisonCard = ({ selectedLabels, batchResult, labelToIndex }
         )}
         {canCompare && indexA !== undefined && indexB !== undefined && pairDetails && (
           <div className="space-y-2 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="truncate">{batchResult.labels[indexA]}</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate font-medium" title={resolve(batchResult.labels[indexA])}>{resolve(batchResult.labels[indexA])}</span>
               <span className="text-muted-foreground">↔</span>
-              <span className="truncate">{batchResult.labels[indexB]}</span>
+              <span className="truncate font-medium" title={resolve(batchResult.labels[indexB])}>{resolve(batchResult.labels[indexB])}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1 text-muted-foreground">

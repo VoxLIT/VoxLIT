@@ -23,9 +23,13 @@ export const AudioPlayer = ({
   const [volume, setVolume] = useState([70]);
 
   const formatTime = (seconds: number) => {
+    if (isNaN(seconds) || seconds < 0) seconds = 0;
+    if (seconds < 60) {
+      return `${seconds.toFixed(1)}s`;
+    }
     const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    const remSecs = (seconds % 60).toFixed(1);
+    return `${mins}:${remSecs.padStart(4, '0')}s`;
   };
 
   const handleVolumeChange = (newVolume: number[]) => {

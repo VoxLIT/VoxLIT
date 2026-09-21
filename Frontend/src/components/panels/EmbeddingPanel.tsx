@@ -152,6 +152,7 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
     }
     return embeddingData.reduced_embeddings.map((p): ExternalEmbeddingPoint => ({
       label: p.filename,
+      displayLabel: p.displayFilename ?? p.filename,
       coordinates: p.coordinates,
       color: p.color ?? '#3b82f6',
       hoverExtra: p.hoverExtra,

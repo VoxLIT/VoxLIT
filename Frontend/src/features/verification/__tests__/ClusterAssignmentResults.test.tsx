@@ -79,8 +79,9 @@ describe("ClusterAssignmentResults", () => {
     // Predicted cluster
     expect(screen.getByText("Cluster 1")).toBeInTheDocument();
 
-    // Ground truth group
-    expect(screen.getByText("spk_1")).toBeInTheDocument();
+    // Ground truth group is not rendered
+    expect(screen.queryByText("Ground-truth speaker group")).not.toBeInTheDocument();
+    expect(screen.queryByText("spk_1")).not.toBeInTheDocument();
 
     // Cluster size
     expect(screen.getByText("3 recordings")).toBeInTheDocument();

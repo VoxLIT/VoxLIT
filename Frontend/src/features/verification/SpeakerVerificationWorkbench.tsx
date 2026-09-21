@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, FileAudio, Users, XCircle } from "lucide-react";
 import { API_BASE } from "@/lib/api";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -8,10 +8,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BatchAnalysisPanel } from "./BatchAnalysisPanel";
+import { ClusterSaliencyTab } from "./ClusterSaliencyTab";
 import { SpeakerSaliencyMap } from "./SpeakerSaliencyMap";
+import { buildClusterColorMap } from "./clusterColors";
 import { verificationAudioUrl } from "./audioUrl";
+import type { BatchAnalysisResponse } from "./batchTypes";
 import type { SaliencyMapResponse } from "./saliencyTypes";
 import { PerturbationTools, type VerificationPerturbationContext } from "@/components/analysis/PerturbationTools";
+import { clusterMapStore } from "./clusterMapStore";
 import type { LocalFilePreview, WorkbenchCenterProps } from "@/tasks/types";
 
 const DEFAULT_SALIENCY_SEGMENT_COUNT = 8;
@@ -102,6 +106,38 @@ export const SpeakerVerificationWorkbench = ({
   const [saliencyGeneratedFor, setSaliencyGeneratedFor] = useState<(RequestKey & { segmentCount: number }) | null>(
     null
   );
+
+  // Batch analysis context — forwarded to ClusterSaliencyTab
+  const [batchResult, setBatchResult] = useState<BatchAnalysisResponse | null>(null);
+  const [batchSubmittedIds, setBatchSubmittedIds] = useState<string[]>([]);
+  const clusterColorMap = useMemo(
+    () => (batchResult ? buildClusterColorMap(batchResult.cluster_labels) : {}),
+    [batchResult]
+  );
+
+  const handleBatchResultChange = useCallback(
+    (nextResult: BatchAnalysisResponse | null, nextSubmittedIds: string[]) => {
+      setBatchResult(nextResult);
+      setBatchSubmittedIds(nextSubmittedIds);
+    },
+    []
+  );
+
+  // Publish recording_id → cluster_id map so the Audio Dataset table can
+  // show cluster assignments in its Cluster column without prop drilling.
+  useEffect(() => {
+    if (!batchResult) {
+      clusterMapStore.publish({});
+      return;
+    }
+    const map: Record<string, string> = {};
+    batchSubmittedIds.forEach((id, i) => {
+      if (batchResult.cluster_labels[i] !== undefined) {
+        map[id] = batchResult.cluster_labels[i];
+      }
+    });
+    clusterMapStore.publish(map);
+  }, [batchResult, batchSubmittedIds]);
 
   // Per-request abort controllers + the identity key captured when each
   // request started. Verify (device/id) and saliency (shared) are each
@@ -567,9 +603,10 @@ export const SpeakerVerificationWorkbench = ({
   return (
     <Tabs defaultValue="pair-verification" className="h-full flex flex-col">
       <div className="flex-shrink-0 bg-panel-header border-b border-border px-3 py-2">
-        <TabsList className="h-7 grid w-full grid-cols-3 bg-muted">
+        <TabsList className="h-7 grid w-full grid-cols-4 bg-muted">
           <TabsTrigger value="pair-verification" className="text-xs">Pair Verification</TabsTrigger>
           <TabsTrigger value="batch-analysis" className="text-xs">Batch Analysis</TabsTrigger>
+          <TabsTrigger value="cluster-saliency" className="text-xs">Cluster Saliency</TabsTrigger>
           <TabsTrigger value="perturbation" className="text-xs">Perturbation</TabsTrigger>
         </TabsList>
       </div>
@@ -792,8 +829,20 @@ export const SpeakerVerificationWorkbench = ({
               selectedBatchIds={selectedBatchIds}
               pairSelection={pairSelection}
               selectedFile={selectedFile}
+              datasetRecordings={datasetRecordings}
               onReprojectHandlerChange={onReprojectHandlerChange}
               onLabelResolverChange={onLabelResolverChange}
+              onBatchResultChange={handleBatchResultChange}
+            />
+          </TabsContent>
+
+          <TabsContent value="cluster-saliency" forceMount className="space-y-4 data-[state=inactive]:hidden">
+            <ClusterSaliencyTab
+              model={model}
+              selectedFile={selectedFile}
+              batchResult={batchResult}
+              submittedIds={batchSubmittedIds}
+              clusterColorMap={clusterColorMap}
             />
           </TabsContent>
 

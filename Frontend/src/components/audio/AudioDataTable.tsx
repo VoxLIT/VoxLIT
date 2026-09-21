@@ -6,6 +6,7 @@ import {
   getFilteredRowModel,
   flexRender,
   ColumnDef,
+  FilterFn,
 } from "@tanstack/react-table";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ interface AudioData {
   duration: number;
   file_path?: string;
   size?: number;
+  file_id?: string;
 }
 
 interface AudioDataTableProps {
@@ -61,9 +63,12 @@ interface AudioDataTableProps {
    *  Analysis supports at most 100 recordings). Undefined for every other
    *  selectionVariant — behavior there is unchanged. */
   maxSelectable?: number;
+  /** Verification-only: maps recording_id → cluster_id. When provided, shows
+   *  a Cluster column in the verification table. */
+  clusterMap?: Record<string, string>;
 }
 
-export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData, model, dataset, datasetMetadata, uploadedFiles, onFilePlay, predictionMap, inferenceStatus, onVisibleRowIdsChange, selectionVariant = 'default', checkedIds, onCheckedIdsChange, maxSelectable }: AudioDataTableProps) => {
+export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData, model, dataset, datasetMetadata, uploadedFiles, onFilePlay, predictionMap, inferenceStatus, onVisibleRowIdsChange, selectionVariant = 'default', checkedIds, onCheckedIdsChange, maxSelectable, clusterMap }: AudioDataTableProps) => {
   // Branch: dataset mode vs custom uploads
   const hasDatasetMetadata = (datasetMetadata?.length || 0) > 0;
   const hasUploadedFiles = uploadedFiles && uploadedFiles.length > 0;
@@ -80,10 +85,16 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     return fallback;
   }, []);
 
+  const getDatasetRowId = useCallback((row: DatasetRow, fallback: string): string => {
+    const v = row["id"] ?? row["path"] ?? row["filepath"] ?? row["file"] ?? row["filename"];
+    return v !== undefined && v !== null && String(v).length > 0 ? String(v) : fallback;
+  }, []);
+
   // Custom uploads data and columns
   const customTableData: AudioData[] = useMemo(() => (
     uploadedFiles?.map(file => ({
       id: file.file_id,
+      file_id: file.file_id,
       filename: file.filename,
       prediction: file.prediction || "",
       groundTruthLabel: "",
@@ -97,6 +108,14 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
   const customColumns: ColumnDef<unknown, unknown>[] = useMemo(() => [
     {
       id: "filename",
+      accessorFn: (row: any) => {
+        if ('file_id' in row) {
+          return (row as AudioData).filename;
+        }
+        const data = row as DatasetRow;
+        const path = getFrom(data, ["path", "filepath", "file", "filename"], "");
+        return path.split("/").pop() || path;
+      },
       header: "Filename",
       cell: ({ row }) => {
         // Handle both AudioData (uploaded files) and DatasetRow (dataset files)
@@ -133,6 +152,21 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     },
     {
       id: "prediction",
+      accessorFn: (row: any) => {
+        if ('file_id' in row) {
+          const data = row as AudioData;
+          const pred = predictionMap?.[data.id] || data.prediction || "";
+          return typeof pred === 'string' ? pred : 
+            (typeof pred === 'object' && pred !== null) ? 
+              (pred as any).predicted_transcript || (pred as any).predicted_emotion || (pred as any).prediction || (pred as any).text || JSON.stringify(pred) : 
+              String(pred);
+        }
+        const pred = predictionMap?.[getDatasetRowId(row, "")] ?? "";
+        return typeof pred === 'string' ? pred : 
+          (typeof pred === 'object' && pred !== null) ? 
+            (pred as any).predicted_transcript || (pred as any).predicted_emotion || (pred as any).prediction || (pred as any).text || JSON.stringify(pred) : 
+            String(pred);
+      },
       header: model.startsWith("whisper") ? "Predicted Transcript" : "Predicted Label",
       cell: ({ row }) => {
         const rowId = row.id as string;
@@ -171,6 +205,13 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     },
     {
       id: "groundTruthLabel",
+      accessorFn: (row: any) => {
+        if ('file_id' in row) {
+          return (row as AudioData).groundTruthLabel;
+        }
+        const data = row as DatasetRow;
+        return getFrom(data, ["sentence", "transcript", "text", "emotion", "label"], "");
+      },
       header: "Ground Truth",
       cell: ({ row }) => {
         // Handle both AudioData and DatasetRow
@@ -187,6 +228,10 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     },
     {
       id: "confidence",
+      accessorFn: (row: any) => {
+        if ('file_id' in row) return (row as AudioData).confidence;
+        return 0;
+      },
       header: "Confidence",
       cell: ({ row }) => {
         // Only show confidence for uploaded files (AudioData)
@@ -203,6 +248,11 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     },
     {
       id: "duration",
+      accessorFn: (row: any) => {
+        if ('file_id' in row) return (row as AudioData).duration;
+        const data = row as DatasetRow;
+        return Number(getFrom(data, ["duration", "length"], "0"));
+      },
       header: "Duration",
       cell: ({ row }) => {
         // Handle both AudioData and DatasetRow
@@ -222,7 +272,7 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
         }
       },
     },
-  ], [model, uploadedFiles, onFilePlay, predictionMap, inferenceStatus, getFrom]);
+  ], [model, uploadedFiles, onFilePlay, predictionMap, inferenceStatus, getFrom, getDatasetRowId]);
 
   // Safe, verification-only columns: no Ground Truth / Predicted Label / Confidence
   // — those column defs simply don't exist in this branch. A leading checkbox
@@ -230,6 +280,7 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
   const verificationColumns: ColumnDef<unknown, unknown>[] = useMemo(() => [
     {
       id: "select",
+      enableGlobalFilter: false,
       header: ({ table }) => {
         // table.getCoreRowModel() covers every loaded row regardless of
         // pagination/search filter — getRowId (below) already guarantees
@@ -294,6 +345,15 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     },
     {
       id: "filename",
+      accessorFn: (row: any) => {
+        if ('file_id' in row) {
+          const data = row as AudioData;
+          return data.filename;
+        }
+        const data = row as DatasetRow;
+        const path = getFrom(data, ["path", "filepath", "file", "filename"], "");
+        return path.split("/").pop() || path;
+      },
       header: "Filename / Recording ID",
       cell: ({ row }) => {
         if ('file_id' in (row.original as any)) {
@@ -307,18 +367,29 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
       },
     },
     {
-      id: "extension",
-      header: "Extension",
+      id: "cluster",
+      accessorFn: (row: any) => {
+        const rowId = 'file_id' in row ? (row as AudioData).id : getDatasetRowId(row as DatasetRow, "");
+        return clusterMap?.[rowId] ?? "";
+      },
+      header: "Cluster",
       cell: ({ row }) => {
-        if ('file_id' in (row.original as any)) {
-          return <span className="text-xs text-muted-foreground">—</span>;
-        }
-        const data = row.original as DatasetRow;
-        return <span className="text-xs text-muted-foreground">{getFrom(data, ["extension"], "")}</span>;
+        const rowId = row.id as string;
+        const clusterId = clusterMap?.[rowId];
+        if (!clusterId) return <span className="text-xs text-muted-foreground">—</span>;
+        return <span className="font-mono text-xs">{clusterId}</span>;
       },
     },
     {
       id: "size",
+      accessorFn: (row: any) => {
+        const isUpload = 'file_id' in row;
+        const sizeBytes = isUpload
+          ? (row as AudioData).size
+          : Number(getFrom(row as DatasetRow, ["size_bytes", "size"], "0")) || undefined;
+        if (!sizeBytes) return "";
+        return `${(sizeBytes / 1024).toFixed(1)} KB`;
+      },
       header: "Size",
       cell: ({ row }) => {
         const isUpload = 'file_id' in (row.original as any);
@@ -331,6 +402,13 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     },
     {
       id: "duration",
+      accessorFn: (row: any) => {
+        const raw = (row as DatasetRow)["duration_seconds"];
+        const seconds = typeof raw === "number" ? raw : null;
+        if (seconds === null) return "";
+        const total = Math.round(seconds);
+        return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+      },
       header: "Duration",
       cell: ({ row }) => {
         const raw = (row.original as DatasetRow)["duration_seconds"];
@@ -344,12 +422,7 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
         );
       },
     },
-  ], [checkedIds, onCheckedIdsChange, getFrom, maxSelectable]);
-
-  const getDatasetRowId = useCallback((row: DatasetRow, fallback: string): string => {
-    const v = row["id"] ?? row["path"] ?? row["filepath"] ?? row["file"] ?? row["filename"];
-    return v !== undefined && v !== null && String(v).length > 0 ? String(v) : fallback;
-  }, []);
+  ], [checkedIds, onCheckedIdsChange, getFrom, getDatasetRowId, maxSelectable, clusterMap]);
 
   // Helper function to determine if ground truth should be shown
   const shouldShowGroundTruth = useMemo(() => {
@@ -367,6 +440,11 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     const baseColumns = [
       {
         id: "filename",
+        accessorFn: (row: any) => {
+          const data = row as DatasetRow;
+          const path = getFrom(data, ["path", "filepath", "file", "filename"], "");
+          return path.split("/").pop() || path;
+        },
         header: "Filename",
         cell: ({ row }) => {
           const data = row.original as DatasetRow;
@@ -381,6 +459,14 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
       // permanently empty and mislabelled ("Predicted Emotion").
       ...(isDeepfakeDemoDataset(dataset) ? [] : [{
         id: "prediction",
+        accessorFn: (row: any) => {
+          const rowId = getDatasetRowId(row as DatasetRow, "");
+          const pred = predictionMap?.[rowId] ?? "";
+          return typeof pred === 'string' ? pred : 
+            (typeof pred === 'object' && pred !== null) ? 
+              (pred as any).predicted_transcript || (pred as any).predicted_emotion || (pred as any).prediction || (pred as any).text || JSON.stringify(pred) : 
+              String(pred);
+        },
         header: model.startsWith("whisper") ? "Predicted Transcript" : "Predicted Emotion",
         cell: ({ row }) => {
           const rowId = row.id as string;
@@ -411,6 +497,12 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     if (shouldShowGroundTruth) {
       baseColumns.push({
         id: "ground_truth",
+        accessorFn: (row: any) => {
+          const data = row as DatasetRow;
+          return model.startsWith("whisper") 
+            ? getFrom(data, ["sentence", "transcript", "text"], "")
+            : getFrom(data, ["emotion", "label"], "");
+        },
         header: model.startsWith("whisper") ? "Ground Truth Transcript" : "Ground Truth Emotion",
         cell: ({ row }) => {
           const data = row.original as DatasetRow;
@@ -424,6 +516,13 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
 
     baseColumns.push({
       id: "duration",
+      accessorFn: (row: any) => {
+        const data = row as DatasetRow;
+        const raw = getFrom(data, ["duration", "duration_seconds"], "");
+        if (raw === "") return "";
+        const d = Number(raw);
+        return isNaN(d) ? "" : `${d.toFixed(2)}s`;
+      },
       header: "Duration",
       cell: ({ row }) => {
         const data = row.original as DatasetRow;
@@ -438,12 +537,17 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     });
 
     return baseColumns;
-  }, [getFrom, model, dataset, predictionMap, inferenceStatus, shouldShowGroundTruth]);
+  }, [getFrom, getDatasetRowId, model, dataset, predictionMap, inferenceStatus, shouldShowGroundTruth]);
 
   const datasetColumnsRavdess: ColumnDef<unknown, unknown>[] = useMemo(() => {
     const baseColumns = [
       {
         id: "filename",
+        accessorFn: (row: any) => {
+          const data = row as DatasetRow;
+          const path = getFrom(data, ["path", "filepath", "file", "filename"], "");
+          return path.split("/").pop() || path;
+        },
         header: "Filename",
         cell: ({ row }) => {
           const data = row.original as DatasetRow;
@@ -454,6 +558,14 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
       },
       {
         id: "prediction",
+        accessorFn: (row: any) => {
+          const rowId = getDatasetRowId(row as DatasetRow, "");
+          const pred = predictionMap?.[rowId] ?? "";
+          return typeof pred === 'string' ? pred : 
+            (typeof pred === 'object' && pred !== null) ? 
+              (pred as any).predicted_transcript || (pred as any).predicted_emotion || (pred as any).prediction || (pred as any).text || JSON.stringify(pred) : 
+              String(pred);
+        },
         header: model.startsWith("whisper") ? "Predicted Transcript" : "Predicted Emotion",
         cell: ({ row }) => {
           const rowId = row.id as string;
@@ -484,6 +596,12 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     if (shouldShowGroundTruth) {
       baseColumns.push({
         id: "ground_truth",
+        accessorFn: (row: any) => {
+          const data = row as DatasetRow;
+          return model.startsWith("whisper") 
+            ? getFrom(data, ["statement", "text", "transcript", "sentence"], "")
+            : getFrom(data, ["emotion", "label"], "");
+        },
         header: model.startsWith("whisper") ? "Ground Truth Transcript" : "Ground Truth Emotion",
         cell: ({ row }) => {
           const data = row.original as DatasetRow;
@@ -497,6 +615,11 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
 
     baseColumns.push({
       id: "duration",
+      accessorFn: (row: any) => {
+        const data = row as DatasetRow;
+        const d = Number(getFrom(data, ["duration", "length"], "0"));
+        return d > 0 ? `${d.toFixed(2)}s` : "";
+      },
       header: "Duration",
       cell: ({ row }) => {
         const data = row.original as DatasetRow;
@@ -510,7 +633,7 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     });
 
     return baseColumns;
-  }, [getFrom, model, predictionMap, inferenceStatus, shouldShowGroundTruth]);
+  }, [getFrom, getDatasetRowId, model, predictionMap, inferenceStatus, shouldShowGroundTruth]);
 
   // Build table config based on mode
   const data: unknown[] = useMemo(() => {
@@ -556,6 +679,54 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     return (row as AudioData).id;
   }, [hasUploadedFiles, hasDatasetMetadata, getDatasetRowId]);
 
+  // Global search filter function across all row metadata, filename, and predictions
+  const globalFilterFn: FilterFn<unknown> = useCallback((row, _columnId, filterValue: string) => {
+    if (!filterValue) return true;
+    const search = String(filterValue).toLowerCase().trim();
+    if (!search) return true;
+
+    const original = row.original as any;
+    if (!original) return false;
+
+    const searchableParts: string[] = [];
+
+    // All string & numeric fields directly on original
+    for (const key of Object.keys(original)) {
+      const val = original[key];
+      if (val !== undefined && val !== null && (typeof val === 'string' || typeof val === 'number')) {
+        searchableParts.push(String(val).toLowerCase());
+      }
+    }
+
+    // Extracted / computed filename
+    if ('filename' in original && original.filename) {
+      searchableParts.push(String(original.filename).toLowerCase());
+    } else {
+      const path = getFrom(original, ["path", "filepath", "file", "filename"], "");
+      const filename = path.split("/").pop() || path;
+      if (filename) searchableParts.push(filename.toLowerCase());
+    }
+
+    // Row ID
+    const rowId = String(row.id);
+    searchableParts.push(rowId.toLowerCase());
+
+    // Predictions
+    const pred = predictionMap?.[rowId];
+    if (pred) {
+      const predText = typeof pred === 'string' ? pred :
+        (typeof pred === 'object' && pred !== null) ?
+          (pred as any).predicted_transcript || (pred as any).predicted_emotion || (pred as any).prediction || (pred as any).text || JSON.stringify(pred) :
+          String(pred);
+      searchableParts.push(predText.toLowerCase());
+    }
+
+    const rowContent = searchableParts.join(" ");
+    const searchTokens = search.split(/\s+/).filter(Boolean);
+
+    return searchTokens.every(token => rowContent.includes(token));
+  }, [getFrom, predictionMap]);
+
   const table = useReactTable<unknown>({
     data,
     columns,
@@ -563,6 +734,7 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
+    globalFilterFn,
     state: {
       globalFilter: searchQuery,
     },
@@ -575,13 +747,18 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
     getRowId,
   });
 
+  // Reset pagination to first page whenever search query changes
+  useEffect(() => {
+    table.setPageIndex(0);
+  }, [searchQuery]);
+
   // Notify parent of currently visible row ids (for sequential per-page inference)
   useEffect(() => {
     if (!onVisibleRowIdsChange) return;
     const rows = table.getRowModel().rows;
     const ids = rows.map(r => String(r.id));
     onVisibleRowIdsChange(ids);
-  }, [onVisibleRowIdsChange, searchQuery, dataset, model, hasDatasetMetadata]);
+  }, [onVisibleRowIdsChange, searchQuery, dataset, model, hasDatasetMetadata, table.getState().pagination.pageIndex]);
 
   return (
     <div className="h-full flex flex-col">
