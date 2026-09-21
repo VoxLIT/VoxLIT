@@ -7,7 +7,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
-import { jest } from '@jest/globals';
+import { vi as jest } from 'vitest';
 
 // Mock audio context for testing
 const mockAudioContext = {
@@ -150,8 +150,7 @@ describe('Audio Component Testing', () => {
       const seekSlider = screen.getByTestId('seek-slider');
       const currentTimeDisplay = screen.getByTestId('current-time');
       
-      await user.clear(seekSlider);
-      await user.type(seekSlider, '5');
+      fireEvent.change(seekSlider, { target: { value: '5' } });
       
       expect(currentTimeDisplay).toHaveTextContent('5s');
     });

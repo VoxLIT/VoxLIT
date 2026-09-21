@@ -1,12 +1,17 @@
 /**
  * Response fixtures for the deepfake component tests.
  *
+ * Importing this file also registers the mock clean up these tests need. It is
+ * done here and not in a shared setup file on purpose: the runner is shared with
+ * other tasks, and resetting every mock after every test would be a surprise for
+ * their tests.
+ *
  * The numbers are the REAL ones measured on the ASVspoof 2019 LA demo subset
  * (see Model Research/deepfake_evaluation/outputs), not invented values. That
  * matters for the formatting assertions: a fixture with a tidy 0.5 would not
  * catch a component that rounds to two decimals where the spec says three.
  */
-import { vi } from "vitest";
+import { afterEach, vi } from "vitest";
 import type {
   DeepfakeEmbeddingProjection,
   DeepfakeEvaluation,
@@ -203,3 +208,8 @@ export const stubFetch = (
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 };
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});

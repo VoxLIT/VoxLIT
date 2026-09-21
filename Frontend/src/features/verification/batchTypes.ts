@@ -6,7 +6,35 @@ export interface ClusterSummary {
   member_indices: number[];
   member_labels: string[];
   mean_intra_cluster_similarity: number | null;
+  min_intra_cluster_similarity: number | null;
+  representative_index: number;
+  representative_label: string;
   mean_fit_score: number;
+}
+
+export interface RecordingClusterStats {
+  cluster_id: string;
+  mean_similarity_to_cluster: number | null;
+  min_similarity_to_cluster: number | null;
+  nearest_index: number;
+  nearest_label: string;
+  nearest_similarity: number;
+  nearest_in_same_cluster: boolean;
+}
+
+export interface EvaluationMetrics {
+  adjusted_rand_index: number;
+  normalized_mutual_information: number;
+  cluster_purity: number;
+  total_unique_pairs: number;
+  true_positive_pairs: number;
+  true_negative_pairs: number;
+  false_positive_pairs: number;
+  false_negative_pairs: number;
+  pairwise_accuracy: number;
+  pairwise_precision: number;
+  pairwise_recall: number;
+  pairwise_f1_score: number;
 }
 
 export interface BatchAnalysisResponse {
@@ -16,6 +44,8 @@ export interface BatchAnalysisResponse {
   recording_count: number;
   embedding_dimension: number;
   labels: string[];
+  ground_truth_groups: string[] | null;
+  ground_truth_available: boolean;
   embeddings: number[][];
   similarity_matrix: number[][];
   decision_matrix: boolean[][];
@@ -25,6 +55,9 @@ export interface BatchAnalysisResponse {
   cluster_fit_scores: number[];
   cluster_count: number;
   cluster_summaries: ClusterSummary[];
+  recording_cluster_stats: RecordingClusterStats[];
+  evaluation_metrics: EvaluationMetrics | null;
+  true_speaker_count: number | null;
 }
 
 export interface BatchProjectionRequestBody {
@@ -43,4 +76,13 @@ export interface BatchProjectionResponse {
   n_components: number;
   effective_components: number;
   coordinates: number[][];
+}
+
+export interface BatchExportRequestBody {
+  model: string;
+  labels: string[];
+  cluster_labels: string[];
+  cluster_summaries: ClusterSummary[];
+  recording_cluster_stats: RecordingClusterStats[];
+  cluster_count: number;
 }

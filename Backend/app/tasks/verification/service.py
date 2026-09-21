@@ -22,7 +22,7 @@ import torch.nn.functional as F
 import torchaudio
 
 from app.core.settings import settings
-from app.tasks.verification import clustering
+from app.tasks.verification import clustering, evaluation_metrics
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,12 +124,18 @@ class _ECAPAAdapter(_BaseAdapter):
     def __init__(self, spec: SpeakerModelSpec) -> None:
         super().__init__(spec.embedding_dimension)
         try:
+            # SpeechBrain 1.1.0 registers LazyModule objects in sys.modules. Torch's
+            # register_fake() calls inspect.getmodule(), which hasattr()s every entry
+            # in sys.modules and thereby wakes those lazy modules -- including
+            # speechbrain.integrations.k2_fsa, which needs the optional 'k2' package
+            # (no Windows wheels). Resolving torch.distributed.tensor first means
+            # register_fake runs while sys.modules is still clean. Do not remove.
+            import torch.distributed.tensor  # noqa: F401
             from speechbrain.inference.classifiers import EncoderClassifier
             from speechbrain.utils.fetching import FetchConfig, LocalStrategy
         except ImportError as error:
             raise SpeakerModelUnavailable(
-                "ECAPA-TDNN requires the 'speechbrain' package. "
-                "Install the backend requirements and restart the API."
+                f"ECAPA-TDNN could not load its speechbrain dependencies: {error}"
             ) from error
 
         savedir = settings.speaker_verification_ecapa_dir_for_revision(spec.revision)
@@ -171,11 +177,14 @@ class _WeSpeakerAdapter(_BaseAdapter):
     def __init__(self, spec: SpeakerModelSpec) -> None:
         super().__init__(spec.embedding_dimension)
         try:
+            # See the comment in _ECAPAAdapter: torch.distributed.tensor must resolve
+            # before speechbrain's LazyModules enter sys.modules. pyannote.audio
+            # imports speechbrain, so this adapter needs the same guard.
+            import torch.distributed.tensor  # noqa: F401
             from pyannote.audio import Inference, Model
         except ImportError as error:
             raise SpeakerModelUnavailable(
-                "ResNet34-LM requires the 'pyannote.audio' package. "
-                "Install the backend requirements and restart the API."
+                f"ResNet34-LM could not load its pyannote.audio dependencies: {error}"
             ) from error
 
         hf_cache_dir = settings.speaker_verification_hf_cache_dir
@@ -333,21 +342,44 @@ def assemble_batch_analysis(
     model_key: str,
     embeddings: torch.Tensor,
     labels: Sequence[str],
+    ground_truth_groups: Sequence[str] | None = None,
 ) -> dict[str, object]:
     """Pairwise similarity/decision/clustering analysis from precomputed embeddings.
 
     Split out of `batch_verification_analysis` so a caller can supply a
     tensor merged from cached and freshly extracted embeddings without
     re-running extraction.
+
+    `ground_truth_groups`, when provided, must be index-aligned with `labels`
+    and is echoed back verbatim as reporting-only ground truth -- it plays no
+    role in clustering, embeddings, or thresholds. Callers are responsible
+    for deciding when partial ground truth should collapse to `None` (see
+    `router.run_batch_dataset`); this function only validates length and
+    reports availability.
     """
 
     if embeddings.shape[0] != len(labels):
         raise ValueError("Embeddings and labels must have the same length.")
+    if ground_truth_groups is not None and len(ground_truth_groups) != len(labels):
+        raise ValueError("Ground-truth groups and labels must have the same length.")
 
     spec = get_model_spec(model_key)
     similarity = pairwise_similarity_matrix(embeddings)
     decisions = pairwise_decision_matrix(similarity, spec.threshold)
     cluster_result = clustering.cluster_batch(model_key, similarity, labels)
+
+    # Reporting-only: this reads the clustering result that has already been
+    # produced above and never feeds back into clustering, similarity, or
+    # decisions (SV-FR-25/34 must never influence prediction).
+    if ground_truth_groups is not None:
+        metrics = evaluation_metrics.evaluate_predicted_clusters(
+            cluster_result["cluster_labels"], ground_truth_groups
+        )
+        evaluation_metrics_payload: dict[str, object] | None = asdict(metrics)
+        true_speaker_count: int | None = len(set(ground_truth_groups))
+    else:
+        evaluation_metrics_payload = None
+        true_speaker_count = None
 
     return {
         "model": spec.key,
@@ -360,6 +392,10 @@ def assemble_batch_analysis(
         "similarity_matrix": similarity.tolist(),
         "decision_matrix": decisions.tolist(),
         **cluster_result,
+        "ground_truth_groups": list(ground_truth_groups) if ground_truth_groups is not None else None,
+        "ground_truth_available": ground_truth_groups is not None,
+        "evaluation_metrics": evaluation_metrics_payload,
+        "true_speaker_count": true_speaker_count,
     }
 
 

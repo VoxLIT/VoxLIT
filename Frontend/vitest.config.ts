@@ -1,20 +1,15 @@
-/// <reference types="vitest" />
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
 /**
- * Test runner for the Audio Deepfake Detection feature — OWNER: Chanupa Gurusinghe.
+ * One test runner for every task's frontend tests.
  *
- * `include` is scoped to src/features/deepfake on purpose. This task owns its
- * own feature folder and nothing else, and the repository's other frontend
- * test file (src/tests/ui-components.test.tsx) imports `@jest/globals`, which
- * is not a dependency here — pulling it into this run would fail the suite on
- * somebody else's file. When the other tasks adopt Vitest, widening this glob
- * is a one-line change.
+ * `npm test` runs everything under src/. To run one task's tests only, pass its
+ * folder, for example `npm run test:deepfake`.
  *
- * The `@` alias mirrors vite.config.ts so components resolve their shared
- * imports (`@/lib/api`, `@/components/ui/...`) exactly as they do in the app.
+ * Shared setup lives in src/test/setup.ts. Task specific setup stays inside the
+ * task's own tests, so one task's mocks can never leak into another task's.
  */
 export default defineConfig({
   plugins: [react()],
@@ -26,10 +21,11 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    setupFiles: ["./src/features/deepfake/__tests__/setup.ts"],
-    include: ["src/features/deepfake/**/*.test.{ts,tsx}"],
-    css: false,
+    setupFiles: ["./src/test/setup.ts"],
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
     coverage: {
+      // Only takes effect with --coverage. Scoped to the deepfake feature,
+      // which is where the reported coverage figure comes from.
       provider: "v8",
       include: ["src/features/deepfake/**/*.{ts,tsx}"],
       exclude: ["src/features/deepfake/__tests__/**", "src/features/deepfake/index.ts"],

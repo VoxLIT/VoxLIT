@@ -11,11 +11,19 @@
  * is built to render the heat strip without it, and this suite silently
  * depends on that being true.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SaliencyPanel } from "../SaliencyPanel";
 import { saliency, stubFetch } from "./fixtures";
+
+// jsdom ships no media pipeline, so HTMLMediaElement.play() returns undefined
+// where every real browser returns a Promise. The seek handler calls .catch()
+// on it, which would throw an error unrelated to the code under test.
+beforeAll(() => {
+  window.HTMLMediaElement.prototype.play = () => Promise.resolve();
+  window.HTMLMediaElement.prototype.pause = () => {};
+});
 
 const renderPanel = (recordingId = "rec_1070252") =>
   render(

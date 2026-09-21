@@ -9,8 +9,9 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:deepfake": "vitest run --config vitest.config.ts",
-    "test:deepfake:watch": "vitest --config vitest.config.ts"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:deepfake": "vitest run src/features/deepfake"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
