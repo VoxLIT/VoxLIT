@@ -1,0 +1,2 @@
+file_id,recording_id,truth,attack,spoof_probability,error_type,confidently_wrong,duration,truncated
+LA_E_9811744,rec_c0f0bd39eb4ae7f6,spoof,A18,0.017944,false_acceptance,True,2.47,False

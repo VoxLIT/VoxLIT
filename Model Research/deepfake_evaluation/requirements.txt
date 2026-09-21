@@ -1,0 +1,14 @@
+# This pipeline deliberately has no dependencies of its own: it imports the
+# backend's own deepfake task (app.tasks.deepfake.*) so that the offline
+# numbers come from exactly the code the API runs. Use the backend venv:
+#
+#   PYTHONPATH=../../Backend ../../Backend/.venv/bin/python src/score_dataset.py --model xlsr-deepfake
+#
+# Everything below is already in Backend/requirements.txt and is listed here
+# only to record what the scripts actually touch.
+torch
+transformers
+soundfile
+librosa
+numpy
+scikit-learn

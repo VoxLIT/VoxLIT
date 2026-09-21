@@ -1,0 +1,4 @@
+file_id,truth,attack,xlsr-deepfake_score,xlsr-mamba_score,correct_model
+LA_E_1126751,spoof,A19,0.462291,0.998844,xlsr-mamba
+LA_E_3986097,spoof,A19,0.142884,0.999541,xlsr-mamba
+LA_E_9811744,spoof,A18,0.893765,0.017944,xlsr-deepfake
