@@ -80,16 +80,29 @@ MODEL_SPECS: dict[str, DeepfakeModelSpec] = {
     # Model B — Audio Spectrogram Transformer. Reads a spectrogram image
     # rather than the waveform, so it fails differently from Model A; that
     # contrast is the point of running both. Same Tier A loading path.
+    #
+    # Checkpoint: MIT/ast-finetuned-audioset-10-10-0.4593 fine-tuned on
+    # ASVspoof 2019 LA (public, MIT licence). It is the domain-specific AST
+    # baseline in Huang & Hu, "Hybrid Audio Detection Using Fine-Tuned Audio
+    # Spectrogram Transformers" (arXiv:2505.15136, 2025), where it scored
+    # best of the three AST checkpoints on ASVspoof 2019 LA (89.65%). It
+    # replaces WpythonW/ast-fakeaudio-detector, which is gated and whose
+    # access request was never approved. The key is kept so the task
+    # registry and frontend need no change.
+    #
+    # Pinned to a commit: a public repo can be re-pushed under "main" and
+    # silently change every score. The id2label ({0: Bonafide, 1: Spoof}) is
+    # still read at load time, never assumed.
     "ast-fakeaudio": DeepfakeModelSpec(
         key="ast-fakeaudio",
         label="Audio Spectrogram Transformer (Model B)",
-        model_id="WpythonW/ast-fakeaudio-detector",
-        revision="main",
+        model_id="MattyB95/AST-ASVspoof2019-Synthetic-Voice-Detection",
+        revision="afd7436a7205ebd7c9ae22d46bbbc6f4f04f85b5",
         sampling_rate=TARGET_SAMPLE_RATE,
         threshold=DEFAULT_THRESHOLD,
         threshold_calibrated=False,
         recommended=False,
-        gated=True,
+        gated=False,
         tier="A",
     ),
     # Model C — XLSR-Mamba (Xiao & Das, IEEE SPL 2025). Tier B: the repo ships
@@ -241,8 +254,9 @@ def _analysis_window_seconds(feature_extractor) -> float:
 def _load_failure_message(spec: DeepfakeModelSpec, error: Exception) -> str:
     """Turn a checkpoint load failure into something actionable.
 
-    A gated repo returns a bare 401 that says nothing about what to do, and
-    it is the most likely failure for Model B.
+    A gated repo returns a bare 401 that says nothing about what to do. No
+    current checkpoint is gated, but repos can become gated after the fact,
+    so the message is still detected from the error text.
     """
     text = str(error)
     looks_gated = "gated" in text.lower() or "401" in text or "restricted" in text.lower()

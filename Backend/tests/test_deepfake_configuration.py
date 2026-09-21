@@ -251,10 +251,14 @@ def test_every_registered_model_declares_its_threshold_as_uncalibrated():
     assert "uncalibrated" in deepfake_service.THRESHOLD_VERSION
 
 
-def test_the_gated_flag_matches_the_models_that_need_a_token():
-    """Model B is the only gated checkpoint; it is the only one needing HF_TOKEN."""
+def test_no_checkpoint_needs_a_token():
+    """Every detector is public: the task must run on a fresh checkout with no HF_TOKEN.
+
+    Model B used to be the gated WpythonW checkpoint; it was replaced by a
+    public one precisely so no access request stands between a user and a score.
+    """
     gated = {key for key, spec in deepfake_service.MODEL_SPECS.items() if spec.gated}
-    assert gated == {"ast-fakeaudio"}
+    assert gated == set()
 
 
 async def test_an_absent_dataset_is_reported_not_raised(client, tmp_path, monkeypatch):

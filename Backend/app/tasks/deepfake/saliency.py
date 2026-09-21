@@ -71,6 +71,13 @@ def _smooth(values, window: int):
     return np.convolve(values, kernel, mode="same")
 
 
+def _real_frame_count(samples: int, sample_rate: int) -> int:
+    """Kaldi fbank frames a clip produces: 25 ms windows, 10 ms hop, no padding."""
+    window = int(0.025 * sample_rate)
+    hop = int(0.010 * sample_rate)
+    return 0 if samples < window else 1 + (samples - window) // hop
+
+
 def _attribution_over_time(adapter, audio_path: str | Path, max_seconds: float):
     """|gradient| of the spoof logit w.r.t. the input, plus its time span.
 
@@ -123,6 +130,11 @@ def _attribution_over_time(adapter, audio_path: str | Path, max_seconds: float):
         # Spectrogram input (frames x mel bins): collapse the frequency axis,
         # leaving one value per time frame.
         gradient = gradient.sum(axis=-1)
+        # AST pads every clip to a fixed frame count (1024 -> 10.24 s). Those
+        # padding frames are not audio: keep only the frames the clip filled,
+        # or a 3 s clip's attribution gets squeezed into its first second.
+        real_frames = _real_frame_count(waveform.shape[1], sample_rate)
+        gradient = gradient[: max(1, min(real_frames, gradient.shape[0]))]
 
     if not np.isfinite(gradient).all():
         raise SaliencyUnavailable("Attribution contained non-finite values.")
