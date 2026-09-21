@@ -7,7 +7,7 @@
  * asked for, and the threshold slider in the detector report.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
@@ -227,5 +227,58 @@ describe("DeepfakePage", () => {
     unmount();
     renderPage();
     expect(document.querySelector(".df-page")).toHaveAttribute("data-theme", "light");
+  });
+});
+
+/** Like routeFetch, but the /run reply waits until the returned function is called. */
+const holdRun = () => {
+  const fetchMock = routeFetch();
+  const answer = fetchMock.getMockImplementation()!;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  fetchMock.mockImplementation(async (url, init) => {
+    if (String(url).endsWith("/run")) await gate;
+    return answer(url, init);
+  });
+  return async () => {
+    await act(async () => {
+      release();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+  };
+};
+
+describe("DeepfakePage review fixes", () => {
+  it("drops a detection that comes back after the visitor picked another clip", async () => {
+    const release = holdRun();
+    renderPage();
+    const library = document.getElementById("library")!;
+    await userEvent.click(await within(library).findByText(recordings.recordings[0].display_filename));
+    const verdict = screen.getByRole("complementary", { name: "Verdict" });
+    await userEvent.click(within(verdict).getByRole("button", { name: /ask the detector/i }));
+
+    // while the first clip is still being listened to, choose another
+    await userEvent.click(await within(library).findByText(recordings.recordings[1].display_filename));
+    await release();
+
+    expect(within(verdict).queryByText("Sounds real")).toBeNull();
+    expect(within(verdict).getByRole("button", { name: /ask the detector/i })).toBeEnabled();
+  });
+
+  it("lets a keyboard user reach, preview and select a map point", async () => {
+    routeFetch();
+    renderPage();
+    await drawMap();
+    const target = projection.recordings[1];
+    const point = pointFor(target.recording_id);
+    const hit = within(point).getByRole("button", { name: new RegExp(`${target.display_filename}.*detector score`) });
+    expect(hit).toHaveAttribute("tabindex", "0");
+
+    fireEvent.focus(hit);
+    expect(await screen.findByRole("dialog", { name: new RegExp(target.display_filename) })).toBeInTheDocument();
+
+    fireEvent.keyDown(hit, { key: "Enter" });
+    expect(point).toHaveAttribute("data-selected", "true");
+    expect(hit).toHaveAttribute("aria-pressed", "true");
   });
 });

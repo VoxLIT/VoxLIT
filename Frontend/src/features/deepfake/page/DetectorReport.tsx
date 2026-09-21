@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { BarChart3, SlidersHorizontal } from "lucide-react";
 import type { DeepfakeEvaluation, DetPoint } from "../types";
@@ -28,24 +28,32 @@ export const DetectorReport = ({
   const [error, setError] = useState<string | null>(null);
   const [cut, setCut] = useState(0.5);
 
+  // Scoring the whole subset takes minutes; a reply that arrives after the
+  // model changed belongs to the old model and is dropped.
+  const latestRequest = useRef(0);
+
   const run = async () => {
+    const request = ++latestRequest.current;
     setRunning(true);
     setError(null);
     try {
       const payload = await postDeepfake<DeepfakeEvaluation>("scores", { model });
+      if (request !== latestRequest.current) return;
       setResult(payload);
       setCut(payload.operating_point.threshold);
     } catch (caught) {
-      setError(errorMessage(caught, "Evaluation failed."));
+      if (request === latestRequest.current) setError(errorMessage(caught, "Evaluation failed."));
     } finally {
-      setRunning(false);
+      if (request === latestRequest.current) setRunning(false);
     }
   };
 
   // A report belongs to one model.
   useEffect(() => {
+    latestRequest.current += 1;
     setResult(null);
     setError(null);
+    setRunning(false);
   }, [model]);
 
   const live = useMemo<DetPoint | null>(() => {

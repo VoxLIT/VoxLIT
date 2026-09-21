@@ -15,7 +15,8 @@ SAFETY
   validated before it is ever joined into a path.
 - Unknown or malformed ids are rejected by pattern before touching the disk.
 - Clips expire after `UPLOAD_TTL_SECONDS` and each session holds at most
-  `MAX_CLIPS_PER_SESSION`; both are enforced lazily on every write/list.
+  `MAX_CLIPS_PER_SESSION`; both are enforced lazily on every write/list, and
+  a throttled sweep of all sessions on write catches abandoned ones.
 
 Unlike the ASVspoof subset these clips have no protocol file, so there is no
 ground truth to leak — the model's score is the only opinion on record.
@@ -29,6 +30,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -46,11 +48,13 @@ _UPLOAD_ID_PATTERN = re.compile(r"^up_[0-9a-f]{16}$")
 ALLOWED_UPLOAD_EXTENSIONS = {".wav", ".flac", ".ogg", ".mp3"}
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 MIN_CLIP_SECONDS = 0.5
-# Every detector analyses at most 30 s; longer clips are refused rather than
-# stored and then silently truncated by every feature.
+# Uploads may run to 60 s; the detectors analyse at most 30 s
+# (service.MAX_ANALYSIS_SECONDS) and report when a longer clip is truncated.
 MAX_CLIP_SECONDS = 60.0
 MAX_CLIPS_PER_SESSION = 20
 UPLOAD_TTL_SECONDS = 24 * 60 * 60
+# How often a write also sweeps every session's directory (see prune_all).
+SWEEP_INTERVAL_SECONDS = 60 * 60
 MAX_DISPLAY_NAME = 120
 
 
@@ -135,6 +139,53 @@ def _prune(directory: Path, now: float | None = None) -> list[UploadInfo]:
     return alive
 
 
+def prune_all(now: float | None = None) -> int:
+    """Sweep every session directory, not just the caller's.
+
+    `_prune` runs only when a session lists or uploads again, so a visitor who
+    never returns would leave their clips on disk forever. Returns the number
+    of session directories removed. Blocking: call from a threadpool.
+    """
+    now = time.time() if now is None else now
+    root = _storage_root()
+    removed = 0
+    if not root.is_dir():
+        return removed
+    for directory in root.iterdir():
+        if not directory.is_dir():
+            continue
+        _prune(directory, now)
+        # A directory that is empty *and* untouched for a while is abandoned.
+        # The age check keeps this from racing a concurrent save_upload that
+        # has just created the directory but not yet written its clip.
+        try:
+            if not any(directory.iterdir()) and now - directory.stat().st_mtime > SWEEP_INTERVAL_SECONDS:
+                directory.rmdir()
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+_sweep_lock = threading.Lock()
+_last_sweep = 0.0
+
+
+def _sweep_if_due() -> None:
+    """Run `prune_all` at most once per `SWEEP_INTERVAL_SECONDS` per process."""
+    global _last_sweep
+    if not _sweep_lock.acquire(blocking=False):
+        return  # another thread is already sweeping
+    try:
+        now = time.time()
+        if now - _last_sweep < SWEEP_INTERVAL_SECONDS:
+            return
+        _last_sweep = now
+        prune_all(now)
+    finally:
+        _sweep_lock.release()
+
+
 def save_upload(sid: str | None, raw_path: Path, filename: str | None, source: str) -> UploadInfo:
     """Decode `raw_path`, store it as 16 kHz mono WAV, return its metadata.
 
@@ -183,6 +234,7 @@ def save_upload(sid: str | None, raw_path: Path, filename: str | None, source: s
     )
     # Sidecar last: a clip only "exists" once its metadata does.
     (directory / f"{clip_id}.json").write_text(json.dumps(asdict(info)), encoding="utf-8")
+    _sweep_if_due()
     return info
 
 

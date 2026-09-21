@@ -94,8 +94,10 @@ def test_phase_one_tier_a_models_are_registered():
     assert {"xlsr-deepfake", "ast-fakeaudio"} <= set(service.MODEL_SPECS)
 
     ast = service.get_model_spec("ast-fakeaudio")
-    assert ast.model_id == "WpythonW/ast-fakeaudio-detector"
-    assert ast.gated is True  # requires accepting conditions + HF_TOKEN
+    assert ast.model_id == "MattyB95/AST-ASVspoof2019-Synthetic-Voice-Detection"
+    assert ast.gated is False  # public; no HF_TOKEN needed
+    # Pinned to a full commit sha so a re-push to "main" cannot change scores.
+    assert len(ast.revision) == 40 and ast.revision != "main"
     assert service.get_model_spec("xlsr-deepfake").gated is False
 
 

@@ -62,7 +62,7 @@ export const VoiceMap = ({
   const { REAL, MID, FAKE } = usePalette();
   const frame = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
-  const closeTimer = useRef<number>();
+  const closeTimer = useRef<number | undefined>(undefined);
 
   const cancelClose = () => window.clearTimeout(closeTimer.current);
   const scheduleClose = useCallback(() => {

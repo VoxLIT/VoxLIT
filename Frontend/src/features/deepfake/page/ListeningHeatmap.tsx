@@ -26,21 +26,27 @@ export const ListeningHeatmap = ({ model, recordingId }: { model: string; record
   const url = audioUrlFor(recordingId);
   const waveform = useWaveform(result ? url : undefined, 200);
 
+  const latestRequest = useRef(0);
+
   useEffect(() => {
+    latestRequest.current += 1;
     setResult(null);
     setError(null);
     setPosition(0);
+    setRunning(false);
   }, [recordingId, model]);
 
   const run = async () => {
+    const request = ++latestRequest.current;
     setRunning(true);
     setError(null);
     try {
-      setResult(await postDeepfake<DeepfakeSaliency>("saliency", { model, recording_id: recordingId }));
+      const payload = await postDeepfake<DeepfakeSaliency>("saliency", { model, recording_id: recordingId });
+      if (request === latestRequest.current) setResult(payload);
     } catch (caught) {
-      setError(errorMessage(caught, "The heatmap failed."));
+      if (request === latestRequest.current) setError(errorMessage(caught, "The heatmap failed."));
     } finally {
-      setRunning(false);
+      if (request === latestRequest.current) setRunning(false);
     }
   };
 
@@ -144,7 +150,11 @@ export const ListeningHeatmap = ({ model, recordingId }: { model: string; record
                   <path
                     d={waveform.peaks
                       .map((peak, index) => {
-                        const px = (index / waveform.peaks.length) * W;
+                        // The peaks span the whole file but the heat only the
+                        // analysed window, so place them by time and drop
+                        // whatever falls past the window.
+                        const px = x((index / waveform.peaks.length) * waveform.duration);
+                        if (px > W) return "";
                         const half = (peak * (H - 14)) / 2.3;
                         const mid = (H - 10) / 2;
                         return `M ${px.toFixed(1)} ${(mid - half).toFixed(1)} L ${px.toFixed(1)} ${(mid + half).toFixed(1)}`;

@@ -9,6 +9,7 @@ per-clip endpoints as demo ids.
 from __future__ import annotations
 
 import io
+import time
 from importlib import import_module
 
 import numpy as np
@@ -149,6 +150,37 @@ async def test_expired_clips_disappear(client, monkeypatch):
 
     assert (await client.get("/tasks/deepfake/uploads")).json()["recordings"] == []
     assert (await client.get(f"/tasks/deepfake/uploads/{clip_id}/audio")).status_code == 404
+
+
+async def test_abandoned_sessions_are_swept_without_their_owner_returning(client, storage):
+    await _upload(client)
+    (session_dir,) = list(storage.iterdir())
+    assert any(session_dir.glob("up_*.wav"))
+
+    # A day later nobody has come back, yet a global sweep still clears it.
+    removed = uploads.prune_all(now=time.time() + uploads.UPLOAD_TTL_SECONDS + uploads.SWEEP_INTERVAL_SECONDS + 10)
+
+    assert removed == 1
+    assert not session_dir.exists()
+
+
+async def test_a_fresh_clip_survives_the_global_sweep(client, storage):
+    await _upload(client)
+    (session_dir,) = list(storage.iterdir())
+
+    assert uploads.prune_all() == 0
+    assert any(session_dir.glob("up_*.wav"))
+
+
+async def test_the_sweep_runs_on_upload_but_only_when_due(client, storage, monkeypatch):
+    sweeps = []
+    monkeypatch.setattr(uploads, "prune_all", lambda now=None: sweeps.append(now) or 0)
+    monkeypatch.setattr(uploads, "_last_sweep", 0.0)
+
+    await _upload(client)
+    await _upload(client)
+
+    assert len(sweeps) == 1
 
 
 async def test_another_session_cannot_see_or_use_the_clip(client, stub_detection):

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { type SyntheticEvent, useMemo } from "react";
 import { motion } from "motion/react";
 import type { EmbeddingRecording } from "../types";
 import { nearest, normalise } from "./mapGeometry";
@@ -31,6 +31,11 @@ const DUST = Array.from({ length: 90 }, (_, index) => {
   return { x: (a - Math.floor(a)) * W, y: (b - Math.floor(b)) * H, r: 0.6 + ((a * 7) % 1) * 1.2, delay: (index % 9) * 0.45 };
 });
 
+/** What a screen reader hears for a point: the clip and the detector's reading — never a dataset label. */
+const pointLabel = (recording: EmbeddingRecording) =>
+  `${recording.display_filename}${recording.uploaded ? " (your clip)" : ""}, ` +
+  `detector score ${Math.round(recording.spoof_probability * 100)} out of 100 synthetic`;
+
 /**
  * The 2D voice map: each recording a glowing point, coloured by the
  * detector's score. The selection is shown by SIZE and ripples — never by a
@@ -47,6 +52,12 @@ export const VoiceMap2D = ({ recordings, coordinates, selectedId, hoveredId, onH
     const scale = Math.min((W / 2 - PAD) / spanX, (H / 2 - PAD) / spanY);
     return unit.map(([x, y]) => [W / 2 + x * scale, H / 2 - y * scale]);
   }, [coordinates]);
+
+  // Hover and keyboard focus open the same detail card, anchored on the point.
+  const announce = (event: SyntheticEvent<SVGCircleElement>, recordingId: string) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    onHover({ recordingId, clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 });
+  };
 
   const selectedIndex = recordings.findIndex((recording) => recording.recording_id === selectedId);
   const neighbours = useMemo(
@@ -69,7 +80,7 @@ export const VoiceMap2D = ({ recordings, coordinates, selectedId, hoveredId, onH
   }, [recordings, selectedId, hoveredId]);
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="h-full w-full" role="img" aria-label="Voice map: one point per recording">
+    <svg viewBox={`0 0 ${W} ${H}`} className="h-full w-full" role="group" aria-label="Voice map: one point per recording. Tab to a point, Enter or Space to select it.">
       <defs>
         <radialGradient id="df-map-bg" cx="50%" cy="45%" r="65%">
           <stop offset="0%" stopColor="rgba(91,156,246,0.06)" />
@@ -156,21 +167,25 @@ export const VoiceMap2D = ({ recordings, coordinates, selectedId, hoveredId, onH
                 strokeWidth={selected ? 2 : 1.6}
                 filter={selected || hovered ? "url(#df-point-glow)" : undefined}
               />
-              {/* generous invisible hit area */}
+              {/* generous invisible hit area — also the keyboard and screen-reader target */}
               <circle
                 r={14}
                 fill="transparent"
-                className="cursor-pointer"
-                onMouseEnter={(event) => {
-                  const box = (event.currentTarget as SVGCircleElement).getBoundingClientRect();
-                  onHover({
-                    recordingId: recording.recording_id,
-                    clientX: box.left + box.width / 2,
-                    clientY: box.top + box.height / 2,
-                  });
-                }}
+                tabIndex={0}
+                role="button"
+                aria-label={pointLabel(recording)}
+                aria-pressed={selected}
+                className="cursor-pointer outline-none focus-visible:stroke-white focus-visible:[stroke-width:2]"
+                onMouseEnter={(event) => announce(event, recording.recording_id)}
+                onFocus={(event) => announce(event, recording.recording_id)}
                 onMouseLeave={() => onHover(null)}
+                onBlur={() => onHover(null)}
                 onClick={() => onSelect(recording.recording_id)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  onSelect(recording.recording_id);
+                }}
               />
             </g>
           </motion.g>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Bot, Dices, Ear, Sparkles, UserRound } from "lucide-react";
 import type { DeepfakeResult, RecordingInfo } from "../types";
@@ -35,28 +35,36 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
   const [error, setError] = useState<string | null>(null);
   const [tally, setTally] = useState({ asked: 0, agreed: 0 });
 
+  // Each request gets a number; a reply only lands if it is still the latest,
+  // so switching clip or model mid-request cannot show the old verdict.
+  const latestRequest = useRef(0);
+
   const recordingId = recording?.recording_id;
   useEffect(() => {
+    latestRequest.current += 1;
     setGuess(null);
     setResult(null);
     setError(null);
+    setRunning(false);
   }, [recordingId, model]);
 
   const ask = async () => {
     if (!recordingId) return;
+    const request = ++latestRequest.current;
     setRunning(true);
     setError(null);
     try {
       const payload = await postDeepfake<DeepfakeResult>("run", { model, recording_id: recordingId });
+      if (request !== latestRequest.current) return;
       setResult(payload);
       if (guess) {
         const agreed = (guess === "fake") === (payload.decision === "spoof");
         setTally((current) => ({ asked: current.asked + 1, agreed: current.agreed + (agreed ? 1 : 0) }));
       }
     } catch (caught) {
-      setError(errorMessage(caught, "Detection failed."));
+      if (request === latestRequest.current) setError(errorMessage(caught, "Detection failed."));
     } finally {
-      setRunning(false);
+      if (request === latestRequest.current) setRunning(false);
     }
   };
 

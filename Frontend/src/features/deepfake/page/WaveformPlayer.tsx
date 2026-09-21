@@ -22,6 +22,7 @@ export const WaveformPlayer = ({ url, label }: { url: string; label: string }) =
   useEffect(() => {
     setPlaying(false);
     setTime(0);
+    setDuration(0);
   }, [url]);
 
   // Follow playback smoothly rather than at timeupdate's ~4 Hz.
