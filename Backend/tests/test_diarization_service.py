@@ -14,6 +14,7 @@ segment-embedding rules (task_b `service.py`).
 
 import hashlib
 import math
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -27,29 +28,58 @@ from app.tasks.task_b import service
 # ---------------------------------------------------------------------------
 
 
-def test_list_models_exposes_the_single_pyannote_spec():
+ALL_MODELS = ["pyannote-3.1", "reverb-v1", "reverb-v2"]
+
+
+def test_list_models_exposes_all_three_specs():
     models = service.list_models()
 
-    assert len(models) == 1
-    spec = models[0]
-    assert spec["key"] == "pyannote-3.1"
-    assert spec["pipeline_id"] == "pyannote/speaker-diarization-3.1"
-    assert spec["embedding_model_id"] == "pyannote/wespeaker-voxceleb-resnet34-LM"
-    assert spec["embedding_dimension"] == 256
-    assert spec["recommended"] is True
+    assert [spec["key"] for spec in models] == ALL_MODELS
+    by_key = {spec["key"]: spec for spec in models}
+    assert by_key["pyannote-3.1"]["pipeline_id"] == "pyannote/speaker-diarization-3.1"
+    assert by_key["reverb-v1"]["pipeline_id"] == "Revai/reverb-diarization-v1"
+    assert by_key["reverb-v2"]["pipeline_id"] == "Revai/reverb-diarization-v2"
+    # Exactly one recommended default, and the UI keeps pyannote as it.
+    assert [spec["key"] for spec in models if spec["recommended"]] == ["pyannote-3.1"]
 
 
-def test_get_model_spec_returns_the_frozen_spec():
-    spec = service.get_model_spec("pyannote-3.1")
-    assert spec is service.MODEL_SPECS["pyannote-3.1"]
+def test_every_model_shares_one_embedding_space():
+    """Verified against the real configs: both Rev pipelines cluster with the
+    same WeSpeaker weights as 3.1 (their mirror id is a byte-identical
+    re-upload). Keeping one embedding_model_id is what makes confidence and
+    the similarity matrix comparable across models -- not an approximation."""
+
+    specs = service.MODEL_SPECS.values()
+    assert {spec.embedding_model_id for spec in specs} == {
+        "pyannote/wespeaker-voxceleb-resnet34-LM"
+    }
+    assert {spec.embedding_dimension for spec in specs} == {256}
 
 
-@pytest.mark.parametrize("bad_key", ["pyannote-4.0", "", "PYANNOTE-3.1", "ecapa-tdnn"])
+@pytest.mark.parametrize("model_key", ALL_MODELS)
+def test_every_spec_carries_a_glass_box_note(model_key):
+    """The workbench header renders this; an empty one would silently drop the
+    caveat about what the model does and does not change."""
+
+    assert service.MODEL_SPECS[model_key].glass_box_note.strip()
+
+
+@pytest.mark.parametrize("model_key", ALL_MODELS)
+def test_get_model_spec_returns_the_frozen_spec(model_key):
+    spec = service.get_model_spec(model_key)
+    assert spec is service.MODEL_SPECS[model_key]
+    assert spec.key == model_key
+
+
+@pytest.mark.parametrize(
+    "bad_key", ["pyannote-4.0", "", "PYANNOTE-3.1", "ecapa-tdnn", "reverb-v3"]
+)
 def test_get_model_spec_rejects_unknown_keys(bad_key):
     with pytest.raises(service.UnsupportedDiarizationModel) as error:
         service.get_model_spec(bad_key)
     # The message must name the valid options -- the router surfaces it as a 400.
-    assert "pyannote-3.1" in str(error.value)
+    for model_key in ALL_MODELS:
+        assert model_key in str(error.value)
 
 
 def test_thresholds_are_the_documented_values():
@@ -531,6 +561,64 @@ def test_get_model_rejects_unknown_keys_before_touching_the_cache(isolated_model
     with pytest.raises(service.UnsupportedDiarizationModel):
         service.get_model("whisper-base")
     assert isolated_model_cache == {}
+
+
+# ---------------------------------------------------------------------------
+# Gated repos -- from_pretrained returns None instead of raising
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def gated_pipeline(monkeypatch):
+    """Reproduce what a gated repo really does on the pinned pyannote 3.4.0:
+    `Pipeline.from_pretrained` prints a help message and returns None. It does
+    NOT raise, so the adapter's `except Exception` never fires."""
+
+    import pyannote.audio
+
+    monkeypatch.setattr(service.settings, "HF_TOKEN", "hf_fake_token")
+    monkeypatch.setattr(
+        pyannote.audio.Pipeline,
+        "from_pretrained",
+        classmethod(lambda cls, *args, **kwargs: None),
+    )
+    # The embedding model is a separate, ungated repo -- stub it so the test
+    # never touches real weights.
+    monkeypatch.setattr(
+        pyannote.audio.Model,
+        "from_pretrained",
+        classmethod(lambda cls, *args, **kwargs: MagicMock()),
+    )
+    monkeypatch.setattr(pyannote.audio, "Inference", MagicMock())
+
+
+@pytest.mark.parametrize("model_key", ALL_MODELS)
+def test_a_gated_pipeline_raises_instead_of_building_a_dead_adapter(
+    gated_pipeline, model_key
+):
+    """Without the guard the adapter builds with pipeline=None and dies minutes
+    later at inference with "'NoneType' object is not callable" -- a 500 that
+    says nothing about gating."""
+
+    with pytest.raises(service.DiarizationModelUnavailable) as error:
+        service._Pyannote31Adapter(service.MODEL_SPECS[model_key])
+
+    message = str(error.value)
+    assert service.MODEL_SPECS[model_key].pipeline_id in message
+    assert "gated" in message.lower()
+    assert "HF_TOKEN" in message
+    # The outer handler must not have re-wrapped our own message into itself.
+    assert message.count("Could not load") == 1
+
+
+def test_a_failed_load_is_never_cached(gated_pipeline, isolated_model_cache):
+    """A dead adapter in `_MODEL_CACHE` would poison every later request until
+    a restart, since `get_model` returns the cached object without re-checking."""
+
+    for _ in range(2):
+        with pytest.raises(service.DiarizationModelUnavailable):
+            service.get_model("reverb-v2")
+        assert isolated_model_cache == {}
 
 
 # ---------------------------------------------------------------------------

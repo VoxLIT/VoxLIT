@@ -17,6 +17,7 @@ from app.tasks.task_b import dataset
 
 BASE = "/tasks/task-b"
 MODEL = "pyannote-3.1"
+ALL_MODELS = ["pyannote-3.1", "reverb-v1", "reverb-v2"]
 
 REAL_DATASET_DIR = settings.speaker_diarization_ami_dataset_dir
 
@@ -122,8 +123,13 @@ async def test_models_endpoint(client):
 
     assert response.status_code == 200
     models = response.json()["models"]
-    assert [m["key"] for m in models] == [MODEL]
-    assert models[0]["recommended"] is True
+    assert [m["key"] for m in models] == ALL_MODELS
+    assert [m["key"] for m in models if m["recommended"]] == [MODEL]
+    # The workbench header renders this; without it the UI would imply the
+    # three models differ more than they do.
+    assert all(m["glass_box_note"].strip() for m in models)
+
+
 
 
 @pytest.mark.asyncio
@@ -315,6 +321,46 @@ async def test_cache_key_is_namespaced_per_model(client, fake_dataset_dir, fake_
 
 
 @pytest.mark.asyncio
+async def test_the_three_models_cache_independently(client, fake_dataset_dir, fake_inference):
+    """Same recording, three models -> three entries, not one shared result.
+    A collision here would silently show one model's timeline under another's
+    name, which is exactly what the comparison workbench exists to avoid."""
+
+    recording_id = await _any_recording_id(client)
+    for model_key in ALL_MODELS:
+        response = await client.post(
+            f"{BASE}/run", json={"model": model_key, "recording_id": recording_id}
+        )
+        assert response.status_code == 200
+        assert response.json()["cached"] is False
+
+    keys = await redis_module.redis.keys("result:diar:*")
+
+    assert len(keys) == 3
+    assert {key.rsplit(":", 1)[0] for key in keys} == {
+        f"result:diar:{model_key}" for model_key in ALL_MODELS
+    }
+    # Every model really ran; none of them was served another's cache entry.
+    assert fake_inference.call_count == 3
+    assert [call[0] for call in fake_inference.calls] == ALL_MODELS
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model_key", ALL_MODELS)
+async def test_run_accepts_every_registered_model(
+    client, fake_dataset_dir, fake_inference, model_key
+):
+    recording_id = await _any_recording_id(client)
+
+    response = await client.post(
+        f"{BASE}/run", json={"model": model_key, "recording_id": recording_id}
+    )
+
+    assert response.status_code == 200
+    assert fake_inference.calls[0][0] == model_key
+
+
+@pytest.mark.asyncio
 async def test_run_is_written_to_the_cache_with_a_ttl(client, fake_dataset_dir, fake_inference):
     """Diarization costs minutes of CPU, so the entry must actually persist."""
 
@@ -336,7 +382,9 @@ async def test_run_rejects_an_unknown_model(client, fake_dataset_dir, fake_infer
     )
 
     assert response.status_code == 400
-    assert MODEL in response.json()["detail"]
+    detail = response.json()["detail"]
+    for model_key in ALL_MODELS:
+        assert model_key in detail
     assert fake_inference.call_count == 0
 
 
