@@ -8,12 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from app.core.redis import cache_result, get_result
 from app.services.dataset_service import media_type_for
+from app.tasks.verification.audio_streaming import stream_audio_file
 
 from . import diff, perturbation, uploads
 from .dataset import (
@@ -73,13 +73,15 @@ async def dataset_recording(recording_id: str):
 
 
 @router.get("/dataset/recordings/{recording_id}/audio")
-async def dataset_recording_audio(recording_id: str):
-    """Serve the audio itself so the frontend player can seek segments."""
+async def dataset_recording_audio(request: Request, recording_id: str):
+    """Serve the audio itself so the frontend player can seek segments.
+    Range requests get a real 206, so seeking deep into a long meeting does
+    not depend on how much the browser has already buffered."""
     try:
         path = resolve_recording_path(recording_id)
     except (DatasetUnavailable, RecordingNotFound) as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    return FileResponse(path, media_type="audio/wav", filename=path.name)
+    return stream_audio_file(path, request, path.name, "audio/wav")
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +163,7 @@ async def uploaded_recording_audio(request: Request, upload_id: str):
         media_type = media_type_for(path)
     except ValueError as error:
         raise HTTPException(status_code=415, detail=str(error)) from error
-    return FileResponse(path, media_type=media_type, filename=path.name)
+    return stream_audio_file(path, request, path.name, media_type)
 
 
 class RunRequest(BaseModel):
@@ -298,7 +300,7 @@ async def perturbed_audio(request: Request, perturbed_id: str):
         path = await run_in_threadpool(uploads.resolve_perturbed_path, perturbed_id, sid)
     except uploads.PerturbedNotFound as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    return FileResponse(path, media_type="audio/wav", filename=path.name)
+    return stream_audio_file(path, request, path.name, "audio/wav")
 
 
 @router.post("/perturbation")

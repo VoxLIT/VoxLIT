@@ -205,35 +205,45 @@ async def test_recording_audio_returns_exact_bytes(client, fake_dataset_dir):
 
     response = await client.get(f"{BASE}/dataset/recordings/{recording['recording_id']}/audio")
 
+    # No Range header: 200 and the whole file, advertising that ranges work.
     assert response.status_code == 200
     assert response.content == FAKE_RECORDINGS[recording["display_filename"]]
+    assert response.headers["content-type"] == "audio/wav"
+    assert response.headers["accept-ranges"] == "bytes"
+
+
+@pytest.mark.asyncio
+async def test_recording_audio_honours_range_with_a_206(client, fake_dataset_dir):
+    """Served through verification's `stream_audio_file`, so a seek deep into
+    a long meeting fetches only the bytes it needs instead of the whole file."""
+
+    recording = (await client.get(f"{BASE}/dataset/recordings")).json()["recordings"][0]
+    payload = FAKE_RECORDINGS[recording["display_filename"]]
+
+    response = await client.get(
+        f"{BASE}/dataset/recordings/{recording['recording_id']}/audio", headers={"Range": "bytes=0-3"}
+    )
+
+    assert response.status_code == 206
+    assert response.content == payload[0:4]
+    assert response.headers["content-range"] == f"bytes 0-3/{len(payload)}"
+    assert response.headers["content-length"] == "4"
+    assert response.headers["accept-ranges"] == "bytes"
     assert response.headers["content-type"] == "audio/wav"
 
 
 @pytest.mark.asyncio
-async def test_recording_audio_ignores_range_and_serves_the_whole_file(client, fake_dataset_dir):
-    """Documents a real divergence from the reference pattern, rather than
-    asserting the behaviour one might expect.
-
-    `tasks/verification` serves audio through its own `stream_audio_file()`
-    helper, which parses `Range` and returns a genuine 206. task_b's audio
-    routes use a plain `FileResponse`, and Starlette 0.37.2's `FileResponse`
-    ignores `Range` — so a seek request gets 200 and the entire file.
-
-    Harmless for the three small demo meetings, but AMI mixes run to tens of
-    MB, so the timeline's seek downloads the whole file each time. Left as-is
-    here: this suite tests the code, it does not change it.
-    """
-
-    recording_id = await _any_recording_id(client)
+async def test_recording_audio_open_ended_range_returns_the_tail(client, fake_dataset_dir):
+    recording = (await client.get(f"{BASE}/dataset/recordings")).json()["recordings"][0]
+    payload = FAKE_RECORDINGS[recording["display_filename"]]
 
     response = await client.get(
-        f"{BASE}/dataset/recordings/{recording_id}/audio", headers={"Range": "bytes=0-3"}
+        f"{BASE}/dataset/recordings/{recording['recording_id']}/audio", headers={"Range": "bytes=4-"}
     )
 
-    assert response.status_code == 200
-    assert response.content == FAKE_RECORDINGS["ES2004a.Mix-Headset.wav"]
-    assert "content-range" not in response.headers
+    assert response.status_code == 206
+    assert response.content == payload[4:]
+    assert response.headers["content-range"] == f"bytes 4-{len(payload) - 1}/{len(payload)}"
 
 
 @pytest.mark.parametrize("bad_id", BAD_IDS)
