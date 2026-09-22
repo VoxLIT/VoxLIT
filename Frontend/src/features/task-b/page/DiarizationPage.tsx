@@ -4,7 +4,6 @@ import { motion, useScroll, useSpring } from "motion/react";
 import { ArrowDown, AudioWaveform, Ear, Layers, Scissors, Sparkles, Users, Zap } from "lucide-react";
 import type { TaskDefinition } from "@/tasks/types";
 import { DiarizationTimeline } from "../DiarizationTimeline";
-import { EmbeddingScatter } from "../EmbeddingScatter";
 import { SimilarityMatrix } from "../SimilarityMatrix";
 import { PerturbationControls } from "../PerturbationControls";
 import { DeltaSummaryCard } from "../DeltaSummaryCard";
@@ -12,6 +11,7 @@ import { StackedTimelines } from "../StackedTimelines";
 import { HeroConversation } from "./HeroConversation";
 import { MeetingLibrary, type MeetingThumbnail } from "./MeetingLibrary";
 import { RunProgress } from "./RunProgress";
+import { SegmentMap } from "./SegmentMap";
 import { Disclosure, ErrorNote, PrimaryButton, SectionTitle } from "./ui";
 import { useDiarization } from "./useDiarization";
 import { DzThemeProvider, ThemeToggle, usePalette, type DzTheme } from "./theme";
@@ -20,6 +20,7 @@ import "./diarization-page.css";
 const NAV = [
   { href: "#meetings", label: "Pick a meeting" },
   { href: "#results", label: "Results" },
+  { href: "#map", label: "Segment map" },
 ];
 
 /**
@@ -239,18 +240,28 @@ const DiarizationPageContent = ({ task, theme }: { task: TaskDefinition; theme: 
                 />
               </LegacyPanel>
 
-              {d.projection && (
-                <LegacyPanel title="Segment embeddings (PCA)">
-                  <EmbeddingScatter
-                    points={d.projection.points}
-                    speakers={d.result.speakers}
-                    hoveredId={d.hoveredId}
-                    selectedId={d.selectedId}
-                    onHover={d.setHoveredId}
-                    onSelect={d.seekToSegment}
-                  />
-                </LegacyPanel>
-              )}
+              {/* Step 3: never gated on the projection — its side columns work without it. */}
+              <div id="map" className="scroll-mt-20 pt-8">
+                <SectionTitle
+                  eyebrow="Step 3 · Which voices sound alike?"
+                  title={<>The <span className="dz-accent-text">segment map</span></>}
+                >
+                  Every dot is a moment of speech. Dots that sound alike sit close together — pick one to see its closest
+                  matches.
+                </SectionTitle>
+                <SegmentMap
+                  result={d.result}
+                  projection={d.projection}
+                  projectionError={d.projectionError}
+                  isRunning={d.isRunning}
+                  embeddingDimension={d.embeddingDimension}
+                  selectedId={d.selectedId}
+                  hoveredId={d.hoveredId}
+                  onHover={d.setHoveredId}
+                  onSelect={d.seekToSegment}
+                  onPlay={(id) => d.playPair(id, id)}
+                />
+              </div>
 
               <LegacyPanel title="Segment similarity matrix" light>
                 <SimilarityMatrix

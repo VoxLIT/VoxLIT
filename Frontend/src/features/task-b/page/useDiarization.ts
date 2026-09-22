@@ -33,6 +33,8 @@ export function useDiarization(model: string) {
   const [selectedRecordingId, setSelectedRecordingId] = useState<string>("");
   const [result, setResult] = useState<DiarizationResult | null>(null);
   const [projection, setProjection] = useState<ProjectionResult | null>(null);
+  // Kept apart from `error`: a map that cannot be drawn is not a failed run.
+  const [projectionError, setProjectionError] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -153,6 +155,7 @@ export function useDiarization(model: string) {
     setSelectedRecordingId(recordingId);
     setResult(null);
     setProjection(null);
+    setProjectionError(null);
     setSelectedId(null);
     setError(null);
     resetPerturbation();
@@ -181,6 +184,7 @@ export function useDiarization(model: string) {
       setSelectedRecordingId(uploaded.recording_id);
       setResult(null);
       setProjection(null);
+      setProjectionError(null);
       setSelectedId(null);
       resetPerturbation();
     } catch (caught) {
@@ -196,6 +200,7 @@ export function useDiarization(model: string) {
     setError(null);
     setResult(null);
     setProjection(null);
+    setProjectionError(null);
     setSelectedId(null);
 
     try {
@@ -210,20 +215,28 @@ export function useDiarization(model: string) {
         throw new Error(runPayload.detail || `Diarization failed (${runResponse.status})`);
       }
       setResult(runPayload as DiarizationResult);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Diarization failed.");
+      setIsRunning(false);
+      return;
+    }
 
+    // Its own try: a projection failure (e.g. too few segments, 422) must not
+    // hide the timeline or show up as a failed run.
+    try {
       const projectionResponse = await fetch(
         `${API_BASE}/tasks/task-b/projection?model=${encodeURIComponent(
           model
         )}&recording_id=${encodeURIComponent(selectedRecordingId)}`,
         { credentials: "include" }
       );
-      const projectionPayload = await projectionResponse.json();
-      if (projectionResponse.ok) {
-        setProjection(projectionPayload as ProjectionResult);
+      const projectionPayload = await projectionResponse.json().catch(() => ({}));
+      if (!projectionResponse.ok) {
+        throw new Error(projectionPayload.detail || `Projection failed (${projectionResponse.status})`);
       }
-      // A projection error (e.g. too few segments) should not hide the timeline.
+      setProjection(projectionPayload as ProjectionResult);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Diarization failed.");
+      setProjectionError(caught instanceof Error ? caught.message : "Projection failed.");
     } finally {
       setIsRunning(false);
     }
@@ -238,6 +251,7 @@ export function useDiarization(model: string) {
   useEffect(() => {
     setResult(null);
     setProjection(null);
+    setProjectionError(null);
     setSelectedId(null);
     resetPerturbation();
     // Only a model change triggers this; resetPerturbation touches refs and
@@ -248,6 +262,7 @@ export function useDiarization(model: string) {
   /** Empty until /models resolves, and for a key the backend does not know —
    *  a missing note renders nothing rather than breaking the header. */
   const glassBoxNote = models.find((m) => m.key === model)?.glass_box_note ?? "";
+  const embeddingDimension = models.find((m) => m.key === model)?.embedding_dimension ?? null;
 
   const runPerturbation = async () => {
     if (!selectedRecordingId || !model) return;
@@ -332,10 +347,12 @@ export function useDiarization(model: string) {
     // run
     result,
     projection,
+    projectionError,
     isRunning,
     error,
     run,
     glassBoxNote,
+    embeddingDimension,
     // shared hover / selection
     hoveredId,
     setHoveredId,
