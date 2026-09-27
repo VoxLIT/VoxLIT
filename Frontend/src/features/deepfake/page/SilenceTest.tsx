@@ -6,6 +6,7 @@ import { readProbeVerdict } from "../SilenceProbeCard";
 import { errorMessage, postDeepfake } from "./api";
 import { usePalette } from "./theme";
 import { Disclosure, ErrorNote, FeatureImage, Finding, PrimaryButton } from "./ui";
+import { formatScore } from "./palette";
 
 const LEGS: { key: keyof SilenceProbeResult["variants"]; label: string; hint: string }[] = [
   { key: "original", label: "Whole clip", hint: "as submitted" },
@@ -62,7 +63,7 @@ export const SilenceTest = ({ model, recordingId }: { model: string; recordingId
             We score the clip three times: whole, with the silence cut away, and with only the silence left.
           </p>
           <PrimaryButton onClick={run} busy={running} className="w-full">
-            <Scissors className="h-4 w-4" /> {running ? "Scoring three ways…" : "Run the silence test"}
+            <Scissors className="h-4 w-4" /> {running ? "Scoring three ways" : "Run the silence test"}
           </PrimaryButton>
         </>
       )}
@@ -81,7 +82,7 @@ export const SilenceTest = ({ model, recordingId }: { model: string; recordingId
                     <dt className="text-slate-400">{leg.label}</dt>
                     <dd className="font-mono text-white">
                       {variant.applicable && variant.spoof_probability !== null
-                        ? variant.spoof_probability.toFixed(3)
+                        ? formatScore(variant.spoof_probability)
                         : "n/a"}
                     </dd>
                     <dd className="font-mono text-slate-500">{variant.seconds.toFixed(2)}s</dd>
@@ -176,7 +177,7 @@ const Column = ({ variant, delay }: { variant: ProbeVariant; delay: number }) =>
         animate={{ opacity: 1 }}
         transition={{ delay: delay + 0.5 }}
       >
-        {score.toFixed(2)}
+        {formatScore(score, 2)}
       </motion.span>
       <motion.div
         className="w-full rounded-t-xl"

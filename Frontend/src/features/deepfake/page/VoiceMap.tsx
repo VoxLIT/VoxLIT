@@ -1,19 +1,19 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Box, Loader2, Orbit, RefreshCw, Square } from "lucide-react";
+import { Box, Loader2, Orbit, RefreshCw, Sparkle, Square } from "lucide-react";
 import type { DeepfakeEmbeddingProjection, RecordingInfo } from "../types";
 import { usePalette } from "./theme";
 import { PointPopup } from "./PointPopup";
-import { Disclosure, ErrorNote, FeatureImage, PrimaryButton } from "./ui";
+import { Disclosure, ErrorNote, PrimaryButton } from "./ui";
 import { VoiceMap2D, type MapPointerEvent } from "./VoiceMap2D";
 
 const VoiceMap3D = lazy(() => import("./VoiceMap3D"));
 
 export type ReductionMethod = "pca" | "umap" | "tsne";
 const METHODS: { id: ReductionMethod; label: string; hint: string }[] = [
-  { id: "pca", label: "PCA", hint: "straight projection — keeps the big picture" },
-  { id: "umap", label: "UMAP", hint: "keeps neighbourhoods — good for clusters" },
-  { id: "tsne", label: "t-SNE", hint: "pulls look-alikes together — distances lie" },
+  { id: "pca", label: "PCA", hint: "linear projection, keeps the global structure" },
+  { id: "umap", label: "UMAP", hint: "keeps neighbourhoods, good for clusters" },
+  { id: "tsne", label: "t-SNE", hint: "pulls similar clips together, distances are not preserved" },
 ];
 
 const POPUP_WIDTH = 270;
@@ -62,6 +62,7 @@ export const VoiceMap = ({
   const { REAL, MID, FAKE } = usePalette();
   const frame = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [spread, setSpread] = useState(true);
   const closeTimer = useRef<number | undefined>(undefined);
 
   const cancelClose = () => window.clearTimeout(closeTimer.current);
@@ -122,16 +123,17 @@ export const VoiceMap = ({
         hoveredId: hover?.id ?? null,
         onHover: handleHover,
         onSelect,
+        spread,
       }
     : null;
 
   return (
-    <div className="flex h-full flex-col gap-3 p-4">
-      {/* controls */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-2">
-          <Orbit className="h-5 w-5 text-violet-300" />
-          <h3 className="font-display text-lg font-semibold text-white">Voice map</h3>
+    <div className="flex h-full flex-col">
+      {/* panel header + controls */}
+      <div className="df-panel-head flex flex-wrap items-center gap-2 px-3 py-2">
+        <div className="flex items-center gap-1.5">
+          <Orbit className="h-4 w-4 text-violet-300" />
+          <h3 className="text-sm font-bold text-white">Voice map</h3>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <div className="flex rounded-full bg-white/5 p-1 ring-1 ring-white/10" role="radiogroup" aria-label="Projection method">
@@ -174,6 +176,15 @@ export const VoiceMap = ({
           </div>
           <button
             type="button"
+            aria-pressed={spread}
+            onClick={() => setSpread((value) => !value)}
+            title="Nudge overlapping points apart so every clip is visible. Off shows the raw projection."
+            className={`flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ring-white/10 transition ${spread ? "df-pill text-slate-950" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}
+          >
+            <Sparkle className="h-3 w-3" /> Spread overlaps
+          </button>
+          <button
+            type="button"
             onClick={onRefresh}
             disabled={!started || loading}
             aria-label="Refresh the voice map"
@@ -184,6 +195,7 @@ export const VoiceMap = ({
         </div>
       </div>
 
+      <div className="flex flex-1 flex-col gap-2 p-3">
       {/* the map frame */}
       <div
         ref={frame}
@@ -191,16 +203,17 @@ export const VoiceMap = ({
         onMouseLeave={scheduleClose}
       >
         {!started && (
-          <div className="absolute inset-0 grid place-items-center">
-            <FeatureImage src="/deepfake/embedding-map.jpg" alt="The Pleiades star cluster, photographed by the Hubble telescope" className="absolute inset-0 rounded-none border-0 opacity-60" />
-            <div className="relative max-w-sm p-6 text-center">
-              <div className="font-display text-2xl font-semibold text-white">Every voice, as a star</div>
-              <p className="mt-2 text-sm text-slate-300">
-                Plot all {datasetSize || ""} clips by how {modelLabel} hears them. Clips it hears alike cluster
-                together; the colour is its own score.
+          <div className="absolute inset-0 grid place-items-center p-6">
+            <div className="max-w-md text-center">
+              {/* a miniature of the real thing, so the button's outcome is visible before pressing it */}
+              <MapPreview />
+              <div className="mt-3 text-sm font-bold text-white">One point per clip</div>
+              <p className="mx-auto mt-1 max-w-sm text-xs text-slate-400">
+                Plot all {datasetSize || ""} clips by how {modelLabel} hears them. Clips it hears alike sit
+                together; the colour is the detector&apos;s own score, never the dataset&apos;s answer.
               </p>
-              <PrimaryButton onClick={onStart} disabled={datasetSize === 0} className="mt-4">
-                <Orbit className="h-4 w-4" /> {datasetSize ? "Map the voices" : "Waiting for the clip list…"}
+              <PrimaryButton onClick={onStart} disabled={datasetSize === 0} className="mt-3">
+                <Orbit className="h-3.5 w-3.5" /> {datasetSize ? "Map the voices" : "Waiting for the clip list"}
               </PrimaryButton>
             </div>
           </div>
@@ -248,7 +261,7 @@ export const VoiceMap = ({
         )}
         {projection && loading && (
           <div className="absolute left-3 top-3 flex items-center gap-2 df-overlay-chip rounded-full px-3 py-1 text-xs text-slate-200 backdrop-blur">
-            <Loader2 className="h-3 w-3 animate-spin" /> Re-drawing…
+            <Loader2 className="h-3 w-3 animate-spin" /> Redrawing
           </div>
         )}
 
@@ -277,16 +290,17 @@ export const VoiceMap = ({
       </div>
       <p className="text-xs text-slate-400">
         Hover a point to peek, click it to study it. The selected clip grows and pulses; dashed lines join it to
-        its five nearest points on this map.
+        its five nearest points on this map. {is3D ? "Drag to turn the map, scroll to move closer" : "Scroll to zoom into a cluster, drag to pan, double-click to reset"}.
+        {spread && " Overlapping points are nudged apart just enough to see each one; turn off Spread overlaps for the raw projection."}
         {projection?.recordings.some((recording) => recording.uploaded) &&
-          " Points ringed and labelled “you” are your own clips, placed among the dataset."}
+          " Points ringed and labelled \"you\" are your own clips, placed among the dataset."}
       </p>
 
       {projection && (
         <Disclosure title="How this map is made">
           {projection.reduction_method_used !== projection.reduction_method && (
             <p className="text-amber-200">
-              {projection.reduction_method.toUpperCase()} could not run on this data — showing{" "}
+              {projection.reduction_method.toUpperCase()} could not run on this data, showing{" "}
               {projection.reduction_method_used.toUpperCase()} instead.
             </p>
           )}
@@ -299,13 +313,50 @@ export const VoiceMap = ({
             dataset&apos;s label.
           </p>
           <p className="text-xs text-slate-400">
-            The projection is for looking, not measuring: distances on screen are not distances inside the model
-            — least of all with t-SNE and UMAP. The axes have no units, so they are not drawn. Threshold{" "}
+            The projection is for looking, not measuring: distances on screen are not distances inside the model,
+            least of all with t-SNE and UMAP. The axes have no units, so they are not drawn. Threshold{" "}
             {projection.threshold.toFixed(2)}
             {projection.threshold_calibrated ? "" : " (uncalibrated)"}.
           </p>
         </Disclosure>
       )}
+      </div>
     </div>
+  );
+};
+
+/**
+ * A small, honest preview of the map: two loose groups of points on the same
+ * blue→red score ramp the real view uses, drifting gently. It shows what the
+ * button produces without pretending to be data.
+ */
+const MapPreview = () => {
+  const { scoreColor, ink } = usePalette();
+  // Fixed layout: a genuine-leaning group on the left, a synthetic-leaning
+  // one on the right, and a few clips in between.
+  const dots = [
+    [18, 46, 0.05], [26, 58, 0.08], [32, 38, 0.06], [40, 52, 0.1], [30, 68, 0.04],
+    [46, 44, 0.12], [22, 34, 0.07], [38, 62, 0.09],
+    [92, 50, 0.45], [104, 40, 0.52], [86, 62, 0.38],
+    [140, 34, 0.88], [150, 48, 0.92], [160, 40, 0.85], [168, 56, 0.94], [148, 64, 0.9],
+    [176, 44, 0.96], [158, 30, 0.82], [134, 54, 0.9], [184, 52, 0.93],
+  ] as const;
+
+  return (
+    <svg viewBox="0 0 200 96" className="mx-auto h-24 w-full max-w-xs" role="img" aria-label="Preview: clips plotted as points, blue where the detector hears a real voice and red where it hears a synthetic one">
+      <rect x={0.5} y={0.5} width={199} height={95} rx={3} fill="none" stroke={ink(0.08)} />
+      {dots.map(([cx, cy, score], index) => (
+        <circle
+          key={index}
+          cx={cx}
+          cy={cy}
+          r={index % 5 === 0 ? 4 : 3}
+          fill={scoreColor(score)}
+          opacity={0.85}
+          className="df-float"
+          style={{ animationDelay: `${(index % 7) * 0.4}s` }}
+        />
+      ))}
+    </svg>
   );
 };

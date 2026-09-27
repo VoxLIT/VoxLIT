@@ -58,7 +58,7 @@ export const errorMessage = (caught: unknown, fallback: string) =>
   caught instanceof Error ? caught.message : fallback;
 
 export const formatSeconds = (seconds: number | null | undefined) =>
-  seconds === null || seconds === undefined ? "—" : `${seconds.toFixed(2)}s`;
+  seconds === null || seconds === undefined ? "n/a" : `${seconds.toFixed(2)}s`;
 
 export const formatBytes = (bytes: number) =>
   bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(2)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;

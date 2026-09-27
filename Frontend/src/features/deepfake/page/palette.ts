@@ -2,14 +2,14 @@
  *  own output — blue reads as a real voice, red as a synthetic one, neutral
  *  slate in between — never by the dataset's hidden labels.
  *
- *  A restrained, diverging blue/slate/red scheme. Two sets: softer tints for
- *  the dark theme, and deeper shades of the same hues for the light theme. */
+ *  A restrained, diverging blue/slate/red ramp that sits on the console's
+ *  white panels next to the shared AWS-blue accent. */
 export interface Palette {
   REAL: string;
   MID: string;
   FAKE: string;
   WARN: string;
-  /** Solid "ink" for markers, needles and playheads: white on dark, near-black on light. */
+  /** Solid "ink" for markers, needles and playheads. */
   INK: string;
   /** Ink at an opacity, for gridlines, tracks and unplayed bars. */
   ink: (alpha: number) => string;
@@ -30,18 +30,7 @@ const rampFor = (real: string, mid: string, fake: string) => {
   };
 };
 
-export const DARK_PALETTE: Palette = {
-  REAL: "#5b9cf6",
-  MID: "#8b97ab",
-  FAKE: "#e5484d",
-  WARN: "#d4a72c",
-  INK: "#e6eaf2",
-  ink: (alpha) => `rgba(230,234,242,${alpha})`,
-  CANVAS: "#0b0f17",
-  scoreColor: rampFor("#5b9cf6", "#8b97ab", "#e5484d"),
-};
-
-export const LIGHT_PALETTE: Palette = {
+export const CONSOLE_PALETTE: Palette = {
   REAL: "#2159c4",
   MID: "#64748b",
   FAKE: "#c53030",
@@ -52,9 +41,7 @@ export const LIGHT_PALETTE: Palette = {
   scoreColor: rampFor("#2159c4", "#64748b", "#c53030"),
 };
 
-// The dark set stays the module default, so code outside the page's theme
-// provider (and the existing tests) keeps its behaviour.
-export const { REAL, MID, FAKE, WARN, scoreColor } = DARK_PALETTE;
+export const { REAL, MID, FAKE, WARN, scoreColor } = CONSOLE_PALETTE;
 
 /** Plain-language strength of a score relative to the threshold. The score is
  *  a ranking, not a probability, so this deliberately avoids percentages. */
@@ -63,4 +50,21 @@ export const leanWords = (score: number, threshold: number): string => {
   if (distance >= 0.35) return "leans strongly";
   if (distance >= 0.15) return "leans";
   return "only just leans";
+};
+
+/** The backend rounds probabilities to 6 decimals, so that is the most any
+ *  score can show. */
+const MAX_DECIMALS = 6;
+
+/** A probability with `digits` decimals, or more when that would round a real
+ *  value to 0 or 1: enough to show two significant figures of the distance
+ *  from the nearer end. Models B and C saturate on in-domain clips
+ *  (0.000027, 0.999997), and "0.000" there reads as a failed run. */
+export const formatScore = (score: number, digits = 3): string => {
+  if (!Number.isFinite(score)) return "n/a";
+  if (score <= 0) return `<0.${"0".repeat(MAX_DECIMALS - 1)}1`;
+  if (score >= 1) return `>0.${"9".repeat(MAX_DECIMALS)}`;
+  const gap = Math.min(score, 1 - score);
+  const needed = Math.ceil(-Math.log10(gap)) + 1;
+  return score.toFixed(Math.min(MAX_DECIMALS, Math.max(digits, needed)));
 };
