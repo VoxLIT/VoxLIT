@@ -66,5 +66,9 @@ export const formatScore = (score: number, digits = 3): string => {
   if (score >= 1) return `>0.${"9".repeat(MAX_DECIMALS)}`;
   const gap = Math.min(score, 1 - score);
   const needed = Math.ceil(-Math.log10(gap)) + 1;
-  return score.toFixed(Math.min(MAX_DECIMALS, Math.max(digits, needed)));
+  const text = score.toFixed(Math.min(MAX_DECIMALS, Math.max(digits, needed)));
+  // closer to an end than 6 decimals can show: bound it rather than round to 0 or 1
+  if (Number(text) <= 0) return `<0.${"0".repeat(MAX_DECIMALS - 1)}1`;
+  if (Number(text) >= 1) return `>0.${"9".repeat(MAX_DECIMALS)}`;
+  return text;
 };

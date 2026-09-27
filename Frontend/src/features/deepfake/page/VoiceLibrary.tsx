@@ -57,12 +57,17 @@ export const VoiceLibrary = ({ recordings, scores, threshold, selectedId, onSele
       name: (recording) => recording.display_filename,
       length: (recording) => recording.duration_seconds ?? 0,
       size: (recording) => recording.size_bytes,
-      // unscored clips sort last in either direction
       score: (recording) => scores.get(recording.recording_id)?.spoof_probability ?? -1,
     };
     const read = value[sort.column];
     const factor = sort.direction === "asc" ? 1 : -1;
     return [...rows].sort((a, b) => {
+      // unscored clips sort last in either direction
+      if (sort.column === "score") {
+        const unscoredA = !scores.has(a.recording_id);
+        const unscoredB = !scores.has(b.recording_id);
+        if (unscoredA !== unscoredB) return unscoredA ? 1 : -1;
+      }
       const left = read(a);
       const right = read(b);
       if (typeof left === "string" && typeof right === "string") return left.localeCompare(right) * factor;
@@ -249,7 +254,7 @@ export const VoiceLibrary = ({ recordings, scores, threshold, selectedId, onSele
       </motion.table>
 
       {visible.length === 0 && (
-        <p className="px-3 py-6 text-center text-xs text-slate-500">No clip matches that search.</p>
+        <p className="px-3 py-6 text-center text-xs text-slate-500">No clip matches these filters.</p>
       )}
     </div>
   );

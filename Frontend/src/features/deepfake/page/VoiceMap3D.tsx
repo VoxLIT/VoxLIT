@@ -313,8 +313,9 @@ const Cloud = ({ recordings, coordinates, selectedId, hoveredId, onHover, onSele
     };
     const release = (event: PointerEvent) => {
       // A drag rotates the view; only a still click selects.
-      if (!down || Math.hypot(event.clientX - down.x, event.clientY - down.y) > 4) return;
+      const start = down;
       down = null;
+      if (!start || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) return;
       const index = pick(event.clientX, event.clientY);
       if (index !== null) latest.current.onSelect(latest.current.recordings[index].recording_id);
     };

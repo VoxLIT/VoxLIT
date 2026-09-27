@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { motion, useSpring, useTransform } from "motion/react";
 import { usePalette } from "./theme";
 import { formatScore } from "./palette";
@@ -28,7 +28,13 @@ export const ScoreDial = ({ score, threshold }: { score: number; threshold: numb
   // from the element's own box rather than from the dial's hub.
   const tipX = useTransform(spring, (value) => polar(value, R - 8)[0]);
   const tipY = useTransform(spring, (value) => polar(value, R - 8)[1]);
-  const text = useTransform(spring, (value) => formatScore(value));
+  // While the needle swings (and overshoots past 0 or 1) show plain decimals;
+  // once it lands, the exact reading.
+  const target = useRef(score);
+  target.current = score;
+  const text = useTransform(spring, (value) =>
+    Math.abs(value - target.current) < 5e-4 ? formatScore(target.current) : Math.max(0, Math.min(1, value)).toFixed(3),
+  );
   const arcLength = useTransform(spring, (value) => value);
 
   const [tx1, ty1] = polar(threshold, R - 18);

@@ -18,5 +18,7 @@ describe("formatScore", () => {
   it("bounds values past the backend's 6-decimal rounding", () => {
     expect(formatScore(0)).toBe("<0.000001");
     expect(formatScore(1)).toBe(">0.999999");
+    expect(formatScore(0.0000004)).toBe("<0.000001");
+    expect(formatScore(0.9999996)).toBe(">0.999999");
   });
 });

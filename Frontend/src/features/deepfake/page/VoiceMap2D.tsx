@@ -261,6 +261,7 @@ export const VoiceMap2D = ({ recordings, coordinates, selectedId, hoveredId, onH
                 </>
               )}
               <motion.circle
+                initial={{ r: radius }}
                 animate={{ r: radius }}
                 transition={{ type: "spring", stiffness: 320, damping: 16 }}
                 fill={colour}
