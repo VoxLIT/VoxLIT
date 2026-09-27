@@ -12,7 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
 const { DeepfakePage } = await import("../page/DeepfakePage");
-const { scoreColor, LIGHT_PALETTE } = await import("../page/palette");
+const { scoreColor } = await import("../page/palette");
 const { detection, evaluation, projection, recordings } = await import("./fixtures");
 import type { TaskDefinition } from "@/tasks/types";
 
@@ -37,6 +37,8 @@ const task: TaskDefinition = {
 
 // fixtures.ts unstubs globals after every test, so this is re-stubbed per test.
 beforeEach(() => {
+  // The page restores its state from sessionStorage; each test starts clean.
+  window.sessionStorage.clear();
   // motion's whileInView needs it; jsdom has none. Report everything as visible.
   class Observer {
     constructor(private callback: IntersectionObserverCallback) {}
@@ -51,13 +53,6 @@ beforeEach(() => {
   }
   vi.stubGlobal("IntersectionObserver", Observer);
   window.scrollTo = () => {};
-  // this jsdom has no localStorage; give the theme switch an in-memory one
-  const store = new Map<string, string>();
-  vi.stubGlobal("localStorage", {
-    getItem: (key: string) => store.get(key) ?? null,
-    setItem: (key: string, value: string) => void store.set(key, value),
-    removeItem: (key: string) => void store.delete(key),
-  });
   Element.prototype.scrollIntoView = () => {};
 });
 
@@ -99,12 +94,15 @@ const pointFor = (recordingId: string) =>
   screen.getAllByTestId("map-point").find((node) => node.getAttribute("data-recording-id") === recordingId)!;
 
 describe("DeepfakePage", () => {
-  it("opens on a plain question with a human-vs-machine illustration, not on a control panel", async () => {
+  it("opens on the study and its three-step protocol, not on a control panel", async () => {
     routeFetch();
     renderPage();
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/real voice,\s*or a machine\?/i);
-    expect(screen.getByRole("img", { name: /human head in profile/i })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /machine head in profile/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/audio deepfake detection/i);
+    expect(screen.getByText(/real voice,/i)).toHaveTextContent(/or a machine\?/i);
+    for (const step of [/1\. Listen/, /2\. Guess/, /3\. Compare/]) {
+      expect(screen.getByText(step)).toBeInTheDocument();
+    }
+    expect(screen.getByRole("button", { name: /start listening/i })).toBeInTheDocument();
   });
 
   it("lays out every clip in the library, with no inner scroll box", async () => {
@@ -167,6 +165,34 @@ describe("DeepfakePage", () => {
     });
   });
 
+  it("restores the detector, the clip, the guess and the verdict after a refresh", async () => {
+    const fetchMock = routeFetch();
+    const first = renderPage();
+    const library = document.getElementById("library")!;
+    await userEvent.click(await within(library).findByText(recordings.recordings[0].display_filename));
+    const verdict = screen.getByRole("complementary", { name: "Verdict" });
+    await userEvent.click(within(verdict).getByRole("radio", { name: /machine/i }));
+    await userEvent.click(within(verdict).getByRole("button", { name: /reveal the detector/i }));
+    await within(verdict).findByText(/you and the detector disagree/i);
+    first.unmount();
+
+    const runs = () => fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/run")).length;
+    const before = runs();
+    renderPage();
+    const restored = screen.getByRole("complementary", { name: "Verdict" });
+    expect(await within(restored).findByText(/you and the detector disagree/i)).toBeInTheDocument();
+    expect(within(restored).getByText(recordings.recordings[0].display_filename)).toBeInTheDocument();
+    // Shown from the session, not asked for again.
+    expect(runs()).toBe(before);
+  });
+
+  it("reopens on the detector that was chosen before a refresh", () => {
+    routeFetch();
+    window.sessionStorage.setItem("voxlit.deepfake.model", JSON.stringify("ast-fakeaudio"));
+    renderPage();
+    expect(screen.getByRole("combobox", { name: /detector model/i })).toHaveTextContent(/audio spectrogram transformer/i);
+  });
+
   it("keeps the numbers one click deeper", async () => {
     routeFetch();
     renderPage();
@@ -195,8 +221,26 @@ describe("DeepfakePage", () => {
 
     fireEvent.change(slider, { target: { value: "0.95" } });
     expect(slider).toHaveValue("0.95");
-    await userEvent.click(within(report).getByRole("button", { name: /snap to balance point/i }));
+    await userEvent.click(within(report).getByRole("button", { name: /τ\s*EER/i }));
     expect(slider).toHaveValue(String(evaluation.eer_threshold));
+  });
+
+  it("sorts the dataset table by the detector's score, highest first", async () => {
+    routeFetch();
+    renderPage();
+    await drawMap();
+    const library = document.getElementById("library")!;
+
+    await userEvent.click(within(library).getByRole("button", { name: /spoof score/i }));
+    const names = within(library)
+      .getAllByRole("button", { pressed: false })
+      .map((button) => button.textContent ?? "")
+      .filter((text) => text.endsWith(".flac"));
+    const expected = [...projection.recordings]
+      .sort((a, b) => b.spoof_probability - a.spoof_probability)
+      .map((recording) => recording.display_filename)
+      .filter((filename) => recordings.recordings.some((row) => row.display_filename === filename));
+    expect(names).toEqual(expected);
   });
 
   it("never renders a per-clip ground-truth label", async () => {
@@ -205,28 +249,6 @@ describe("DeepfakePage", () => {
     await drawMap();
     const library = document.getElementById("library")!;
     expect(library.textContent).not.toMatch(/bona ?fide|\bspoof\b|\bA[01]\d\b/i);
-  });
-
-  it("switches to a light theme, remembers it, and recolours points with the light palette", async () => {
-    routeFetch();
-    const { unmount } = renderPage();
-    const page = document.querySelector(".df-page")!;
-    expect(page).toHaveAttribute("data-theme", "dark");
-
-    await drawMap();
-    await userEvent.click(screen.getByRole("switch", { name: /light theme/i }));
-    expect(page).toHaveAttribute("data-theme", "light");
-    expect(screen.getByRole("switch", { name: /light theme/i })).toHaveAttribute("aria-checked", "true");
-    expect(window.localStorage.getItem("voxlit:deepfake:theme")).toBe("light");
-
-    // still coloured by the detector's score — just the light set of shades
-    const target = projection.recordings[0];
-    const fills = [...pointFor(target.recording_id).querySelectorAll("circle")].map((circle) => circle.getAttribute("fill"));
-    expect(fills).toContain(LIGHT_PALETTE.scoreColor(target.spoof_probability));
-
-    unmount();
-    renderPage();
-    expect(document.querySelector(".df-page")).toHaveAttribute("data-theme", "light");
   });
 });
 

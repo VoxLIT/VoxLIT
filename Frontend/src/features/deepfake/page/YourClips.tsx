@@ -39,11 +39,11 @@ export const YourClips = ({ clips, selectedId, onAdded, onRemoved, onSelect }: Y
   const send = useCallback(
     async (blob: Blob, filename: string, source: UserClip["source"]) => {
       setError(null);
-      setBusy(source === "recording" ? "Uploading your recording…" : `Converting ${filename}…`);
+      setBusy(source === "recording" ? "Uploading your recording" : `Converting ${filename}`);
       try {
         const { wav, duration } = await convertToWav(blob);
-        if (duration < MIN_SECONDS) throw new Error(`That clip is only ${duration.toFixed(1)}s — give it at least ${MIN_SECONDS}s.`);
-        setBusy("Uploading…");
+        if (duration < MIN_SECONDS) throw new Error(`That clip is only ${duration.toFixed(1)}s. Give it at least ${MIN_SECONDS}s.`);
+        setBusy("Uploading");
         const clip = await uploadUserClip(wav, wavName(filename), source);
         onAdded(clip);
       } catch (caught) {
@@ -90,7 +90,7 @@ export const YourClips = ({ clips, selectedId, onAdded, onRemoved, onSelect }: Y
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
-        className={`df-glass flex flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed p-6 text-center transition-colors ${
+        className={`df-glass flex flex-col items-center justify-center gap-3 border-2 border-dashed p-4 text-center transition-colors ${
           dragging ? "border-cyan-300/70 bg-cyan-300/5" : "border-white/10"
         }`}
       >
@@ -99,7 +99,7 @@ export const YourClips = ({ clips, selectedId, onAdded, onRemoved, onSelect }: Y
         </div>
         <div>
           <div className="font-display text-lg font-semibold text-white">Upload a clip</div>
-          <p className="mt-1 text-sm text-slate-400">Drop an audio file here — WAV, MP3, FLAC, OGG or M4A, up to 60 s.</p>
+          <p className="mt-1 text-sm text-slate-400">Drop an audio file here: WAV, MP3, FLAC, OGG or M4A, up to 60 s.</p>
         </div>
         <PrimaryButton onClick={() => fileInput.current?.click()} disabled={!!busy}>
           <FileAudio className="h-4 w-4" /> Choose a file
@@ -121,10 +121,10 @@ export const YourClips = ({ clips, selectedId, onAdded, onRemoved, onSelect }: Y
       <Recorder disabled={!!busy} onUse={(take) => send(take.blob, "recording.webm", "recording")} onError={setError} />
 
       {/* your clips */}
-      <div className="df-glass flex flex-col gap-3 rounded-3xl p-5">
+      <div className="df-glass flex flex-col gap-3 p-3">
         <div className="flex items-baseline justify-between">
           <div className="font-display text-lg font-semibold text-white">Your clips</div>
-          <span className="text-xs text-slate-500">kept for 24 h · only you can see them</span>
+          <span className="text-xs text-slate-500">Kept for 24 h. Only you can see them.</span>
         </div>
         <AnimatePresence>{busy && <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-sm text-cyan-200">{busy}</motion.p>}</AnimatePresence>
         {error && <ErrorNote>{error}</ErrorNote>}
@@ -160,7 +160,7 @@ export const YourClips = ({ clips, selectedId, onAdded, onRemoved, onSelect }: Y
                         <span className="truncate">{clip.display_filename}</span>
                       </div>
                       <div className="text-[11px] text-slate-400">
-                        {formatSeconds(clip.duration_seconds)} · {formatBytes(clip.size_bytes)} · {selected ? "being studied" : "click to study"}
+                        {formatSeconds(clip.duration_seconds)}, {formatBytes(clip.size_bytes)}, {selected ? "being studied" : "click to study"}
                       </div>
                     </button>
                     <button
@@ -255,7 +255,7 @@ const Recorder = ({ disabled, onUse, onError }: { disabled: boolean; onUse: (tak
       setLevel(0);
       const blob = new Blob(chunks, { type: media.mimeType || "audio/webm" });
       if (seconds < MIN_SECONDS || blob.size === 0) {
-        onError("That take was too short — hold the button a little longer.");
+        onError("That take was too short. Hold the button a little longer.");
         return;
       }
       setTake({ blob, url: URL.createObjectURL(blob), seconds });
@@ -269,7 +269,7 @@ const Recorder = ({ disabled, onUse, onError }: { disabled: boolean; onUse: (tak
   const remaining = Math.max(0, MAX_RECORDING_SECONDS - elapsed);
 
   return (
-    <div className="df-glass flex flex-col items-center justify-center gap-3 rounded-3xl p-6 text-center">
+    <div className="df-glass flex flex-col items-center justify-center gap-3 p-4 text-center">
       <div className="relative grid h-14 w-14 place-items-center">
         {recording && (
           <motion.span
@@ -288,7 +288,7 @@ const Recorder = ({ disabled, onUse, onError }: { disabled: boolean; onUse: (tak
         <p className="mt-1 text-sm text-slate-400">
           {supported
             ? recording
-              ? `Recording… ${elapsed.toFixed(1)}s (stops by itself in ${remaining.toFixed(0)}s)`
+              ? `Recording ${elapsed.toFixed(1)}s (stops by itself in ${remaining.toFixed(0)}s)`
               : `Say a sentence or two, up to ${MAX_RECORDING_SECONDS}s. Then see if the detectors believe you're real.`
             : "This browser cannot record audio. Upload a file instead."}
         </p>

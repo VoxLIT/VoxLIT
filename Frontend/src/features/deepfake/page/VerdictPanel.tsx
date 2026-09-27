@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Bot, Dices, Ear, Sparkles, UserRound } from "lucide-react";
+import { Bot, Dices, Ear, Gauge, Sparkles, UserRound } from "lucide-react";
 import type { DeepfakeResult, RecordingInfo } from "../types";
 import { audioUrlFor, errorMessage, formatBytes, formatSeconds, postDeepfake } from "./api";
-import { leanWords } from "./palette";
+import { readSession, resultKey, useSessionState, writeSession } from "./session";
+import { leanWords, formatScore } from "./palette";
 import { usePalette } from "./theme";
 import { ScoreDial } from "./ScoreDial";
 import { Disclosure, ErrorNote, PrimaryButton, VerdictChip } from "./ui";
@@ -29,23 +30,30 @@ interface VerdictPanelProps {
  */
 export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpriseDisabled }: VerdictPanelProps) => {
   const { REAL, FAKE, ink } = usePalette();
-  const [guess, setGuess] = useState<Guess>(null);
-  const [result, setResult] = useState<DeepfakeResult | null>(null);
+  const recordingId = recording?.recording_id;
+  // The guess and the answer for this clip and detector survive a refresh.
+  const guessKey = resultKey("guess", model, recordingId ?? "");
+  const runKey = resultKey("run", model, recordingId ?? "");
+  const [guess, setGuess] = useState<Guess>(() => (recordingId ? readSession<Guess>(guessKey) : null));
+  const [result, setResult] = useState<DeepfakeResult | null>(() =>
+    recordingId ? readSession<DeepfakeResult>(runKey) : null,
+  );
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tally, setTally] = useState({ asked: 0, agreed: 0 });
+  const [tally, setTally] = useSessionState("tally", { asked: 0, agreed: 0 });
 
   // Each request gets a number; a reply only lands if it is still the latest,
   // so switching clip or model mid-request cannot show the old verdict.
   const latestRequest = useRef(0);
 
-  const recordingId = recording?.recording_id;
   useEffect(() => {
     latestRequest.current += 1;
-    setGuess(null);
-    setResult(null);
+    setGuess(recordingId ? readSession<Guess>(guessKey) : null);
+    setResult(recordingId ? readSession<DeepfakeResult>(runKey) : null);
     setError(null);
     setRunning(false);
+    // guessKey and runKey are derived from recordingId and model.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordingId, model]);
 
   const ask = async () => {
@@ -57,6 +65,7 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
       const payload = await postDeepfake<DeepfakeResult>("run", { model, recording_id: recordingId });
       if (request !== latestRequest.current) return;
       setResult(payload);
+      writeSession(runKey, payload);
       if (guess) {
         const agreed = (guess === "fake") === (payload.decision === "spoof");
         setTally((current) => ({ asked: current.asked + 1, agreed: current.agreed + (agreed ? 1 : 0) }));
@@ -70,7 +79,12 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
 
   if (!recording) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+      <div className="flex h-full flex-col">
+        <div className="df-panel-head flex items-center gap-1.5 px-3 py-2">
+          <Gauge className="h-4 w-4 text-cyan-300" />
+          <h3 className="text-sm font-bold text-white">Verdict</h3>
+        </div>
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-center">
         <motion.div
           animate={{ rotate: [0, -8, 8, 0], y: [0, -4, 0] }}
           transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
@@ -81,12 +95,13 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
         <div>
           <div className="font-display text-xl font-semibold text-white">Pick a voice</div>
           <p className="mt-1 text-sm text-slate-400">
-            Click a star on the voice map, choose a clip from the library below, or let chance decide.
+            Click a point on the voice map, choose a clip from the library below, or let chance decide.
           </p>
         </div>
         <PrimaryButton onClick={onSurprise} disabled={surpriseDisabled}>
           <Dices className="h-4 w-4" /> Surprise me
         </PrimaryButton>
+        </div>
       </div>
     );
   }
@@ -95,7 +110,12 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
   const agreed = result && guess ? (guess === "fake") === spoof : null;
 
   return (
-    <div className="flex h-full flex-col gap-4 p-5">
+    <div className="flex h-full flex-col">
+      <div className="df-panel-head flex items-center gap-1.5 px-3 py-2">
+        <Gauge className="h-4 w-4 text-cyan-300" />
+        <h3 className="text-sm font-bold text-white">Verdict</h3>
+      </div>
+      <div className="flex flex-1 flex-col gap-3 p-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-widest text-slate-400">Now listening to</div>
@@ -133,7 +153,10 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
                 role="radio"
                 aria-checked={active}
                 disabled={!!result}
-                onClick={() => setGuess(option)}
+                onClick={() => {
+                  setGuess(option);
+                  writeSession(guessKey, option);
+                }}
                 whileTap={{ scale: 0.95 }}
                 animate={{ scale: active ? 1.03 : 1 }}
                 className="flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors disabled:cursor-default"
@@ -156,7 +179,7 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
       {!result && (
         <PrimaryButton onClick={ask} busy={running} className="w-full">
           <Sparkles className="h-4 w-4" />
-          {running ? "The detector is listening…" : guess ? "Reveal the detector's answer" : "Ask the detector"}
+          {running ? "The detector is listening" : guess ? "Reveal the detector's answer" : "Ask the detector"}
         </PrimaryButton>
       )}
       {running && (
@@ -194,7 +217,7 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
                   transition={{ type: "spring", stiffness: 260, damping: 14, delay: 0.5 }}
                   className={`mt-2 text-sm font-semibold ${agreed ? "text-emerald-300" : "text-amber-300"}`}
                 >
-                  {agreed ? "You and the detector agree." : "You and the detector disagree — listen again?"}
+                  {agreed ? "You and the detector agree." : "You and the detector disagree. Listen again?"}
                 </motion.p>
               )}
               {tally.asked > 0 && (
@@ -207,11 +230,11 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
 
             <Disclosure>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
-                <Detail label="spoof score" value={result.spoof_probability.toFixed(3)} />
-                <Detail label="bona fide score" value={result.bonafide_probability.toFixed(3)} />
+                <Detail label="spoof score" value={formatScore(result.spoof_probability)} />
+                <Detail label="bona fide score" value={formatScore(result.bonafide_probability)} />
                 <Detail label="threshold" value={`${result.threshold.toFixed(2)}${result.threshold_calibrated ? "" : " (uncalibrated)"}`} />
                 <Detail label="logits" value={`[${result.logits.map((value) => value.toFixed(2)).join(", ")}]`} />
-                <Detail label="spoof class" value={`${result.spoof_index} · ${result.id2label[String(result.spoof_index)]}`} />
+                <Detail label="spoof class" value={`${result.spoof_index}: ${result.id2label[String(result.spoof_index)]}`} />
                 <Detail label="duration" value={formatSeconds(result.duration)} />
                 <Detail label="analysed" value={`${formatSeconds(result.analysed_seconds)} of ${formatSeconds(result.analysis_window_seconds)} window`} />
                 <Detail label="file size" value={formatBytes(recording.size_bytes)} />
@@ -219,17 +242,18 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
               <p className="text-xs text-slate-400">
                 The score is a ranking, not a probability: 0.90 does not mean &ldquo;90% likely fake&rdquo;.
                 {!result.threshold_calibrated &&
-                  ` ${result.threshold.toFixed(2)} is the naive midpoint, not an equal-error-rate operating point — the Detector report below shows where a calibrated cut would sit.`}
+                  ` ${result.threshold.toFixed(2)} is the naive midpoint, not an equal-error-rate operating point. The Detector report below shows where a calibrated cut would sit.`}
                 {result.truncated && ` Only the first ${result.analysed_seconds}s of this ${result.duration}s clip were scored.`}
               </p>
               <p className="break-all font-mono text-[11px] text-slate-500">
-                {result.model_id} · {result.threshold_version}
-                {result.cached ? " · cached" : ""}
+                {result.model_id}, {result.threshold_version}
+                {result.cached ? ", cached" : ""}
               </p>
             </Disclosure>
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 };

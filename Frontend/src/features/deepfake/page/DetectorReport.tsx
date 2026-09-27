@@ -3,8 +3,9 @@ import { motion } from "motion/react";
 import { BarChart3, SlidersHorizontal } from "lucide-react";
 import type { DeepfakeEvaluation, DetPoint } from "../types";
 import { errorMessage, postDeepfake } from "./api";
+import { readSession, resultKey, writeSession } from "./session";
 import { AttackBars, CountUp, DetChart, Histogram } from "./charts";
-import { useDfTheme, usePalette } from "./theme";
+import { usePalette } from "./theme";
 import { Disclosure, ErrorNote, FeatureImage, PrimaryButton } from "./ui";
 
 /**
@@ -21,12 +22,17 @@ export const DetectorReport = ({
   modelLabel: string;
   datasetSize: number;
 }) => {
-  const { REAL, MID, FAKE, WARN } = usePalette();
+  const { REAL, MID, FAKE } = usePalette();
   const datasetAvailable = datasetSize > 0;
-  const [result, setResult] = useState<DeepfakeEvaluation | null>(null);
+  const key = resultKey("scores", model);
+  const [result, setResult] = useState<DeepfakeEvaluation | null>(() => readSession<DeepfakeEvaluation>(key));
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [cut, setCut] = useState(0.5);
+  const [cut, setCutState] = useState(() => readSession<number>(`${key}.cut`) ?? 0.5);
+  const setCut = (value: number) => {
+    setCutState(value);
+    writeSession(`${key}.cut`, value);
+  };
 
   // Scoring the whole subset takes minutes; a reply that arrives after the
   // model changed belongs to the old model and is dropped.
@@ -40,6 +46,7 @@ export const DetectorReport = ({
       const payload = await postDeepfake<DeepfakeEvaluation>("scores", { model });
       if (request !== latestRequest.current) return;
       setResult(payload);
+      writeSession(key, payload);
       setCut(payload.operating_point.threshold);
     } catch (caught) {
       if (request === latestRequest.current) setError(errorMessage(caught, "Evaluation failed."));
@@ -51,16 +58,18 @@ export const DetectorReport = ({
   // A report belongs to one model.
   useEffect(() => {
     latestRequest.current += 1;
-    setResult(null);
+    setResult(readSession<DeepfakeEvaluation>(key));
+    setCutState(readSession<number>(`${key}.cut`) ?? 0.5);
     setError(null);
     setRunning(false);
-  }, [model]);
+  }, [key]);
 
   const live = useMemo<DetPoint | null>(() => {
     if (!result || result.det_curve.length === 0) return null;
-    return result.det_curve.reduce((best, point) =>
-      Math.abs(point.threshold - cut) < Math.abs(best.threshold - cut) ? point : best,
-    );
+    // Decisions only change at a clip's score, so every cut behaves exactly
+    // like the first evaluated threshold at or above it (s ≥ τ is spoof).
+    const ordered = [...result.det_curve].sort((a, b) => a.threshold - b.threshold);
+    return ordered.find((point) => point.threshold >= cut) ?? ordered[ordered.length - 1];
   }, [result, cut]);
 
   if (!result) {
@@ -76,7 +85,7 @@ export const DetectorReport = ({
           <p className="text-lg text-slate-200">
             One clip can&apos;t tell you if a detector is any good. Run it on all{" "}
             <span className="font-semibold text-white">{datasetSize || "the"} labelled clips</span> and see how cleanly it separates
-            real voices from synthetic ones — and what every threshold would cost.
+            real voices from synthetic ones, and what every threshold would cost.
           </p>
           <ul className="space-y-2 text-sm text-slate-300">
             <li className="flex gap-2">
@@ -100,9 +109,9 @@ export const DetectorReport = ({
           )}
           <PrimaryButton onClick={run} busy={running} disabled={!datasetAvailable}>
             <BarChart3 className="h-4 w-4" />
-            {running ? "Testing on every clip…" : `Test ${modelLabel}`}
+            {running ? "Testing on every clip" : `Test ${modelLabel}`}
           </PrimaryButton>
-          {running && <p className="text-xs text-slate-400">One pass per clip — minutes the first time, cached after.</p>}
+          {running && <p className="text-xs text-slate-400">One pass per clip. This takes a few minutes the first time and is cached after.</p>}
           {error && <ErrorNote>{error}</ErrorNote>}
         </div>
       </div>
@@ -122,7 +131,7 @@ export const DetectorReport = ({
         <BigStat
           label="Mistakes at its best balance point"
           value={<CountUp value={result.eer_percent} format={(v) => `${v.toFixed(1)}%`} />}
-          hint="equal error rate — lower is better"
+          hint="equal error rate, lower is better"
           colour={MID}
         />
         <BigStat
@@ -140,11 +149,13 @@ export const DetectorReport = ({
       </div>
 
       {/* play with the cut */}
-      <div className="df-glass rounded-3xl p-5">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <SlidersHorizontal className="h-4 w-4 text-violet-300" />
-          <h4 className="font-display text-lg font-semibold text-white">Move the cut</h4>
-          <span className="text-sm text-slate-400">— every clip right of the line is called synthetic</span>
+      <div className="df-glass p-3">
+        <div className="mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <SlidersHorizontal className="h-4 w-4 self-center text-violet-300" />
+          <h4 className="font-display text-lg font-semibold text-white">Score distributions by class</h4>
+          <span className="text-sm text-slate-400">
+            n = {result.bonafide_count} bona fide, {result.spoof_count} spoof. Clips with s ≥ τ are classified as spoof; hatched bins are misclassified.
+          </span>
         </div>
         <Histogram
           bonafide={result.distributions.bonafide}
@@ -153,7 +164,8 @@ export const DetectorReport = ({
           eerThreshold={result.eer_threshold}
           shippedThreshold={result.operating_point.threshold}
         />
-        <div className="mt-2 px-1">
+        <div className="mt-2 flex items-center gap-3 px-1">
+          <span className="shrink-0 text-xs font-medium text-slate-400">Threshold τ</span>
           <input
             type="range"
             min={0}
@@ -165,18 +177,23 @@ export const DetectorReport = ({
             aria-valuetext={`threshold ${cut.toFixed(3)}`}
             className="df-range"
           />
+          <span className="w-12 shrink-0 text-right font-mono text-xs text-slate-300">{cut.toFixed(3)}</span>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-          <button type="button" onClick={() => setCut(result.eer_threshold)} className="rounded-full px-3 py-1 font-semibold ring-1 ring-violet-300/50 transition hover:bg-violet-400/10" style={{ color: MID }}>
-            Snap to balance point ({result.eer_threshold.toFixed(3)})
+          <button type="button" onClick={() => setCut(result.eer_threshold)} className="rounded-md px-2.5 py-1 font-medium ring-1 ring-white/20 transition hover:bg-white/5" style={{ color: MID }}>
+            Set τ = τ<sub>EER</sub> ({result.eer_threshold.toFixed(3)})
           </button>
-          <button type="button" onClick={() => setCut(result.operating_point.threshold)} className="rounded-full px-3 py-1 font-semibold text-slate-300 ring-1 ring-white/20 transition hover:bg-white/5">
-            Snap to the cut in use ({result.operating_point.threshold.toFixed(2)})
+          <button type="button" onClick={() => setCut(result.operating_point.threshold)} className="rounded-md px-2.5 py-1 font-medium text-slate-300 ring-1 ring-white/20 transition hover:bg-white/5">
+            Set τ = τ<sub>op</sub> ({result.operating_point.threshold.toFixed(3)})
           </button>
-          <span className="ml-auto flex items-center gap-3 text-slate-400">
-            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: REAL }} /> genuine</span>
-            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm" style={{ background: FAKE }} /> synthetic</span>
-            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-sm ring-2" style={{ ["--tw-ring-color" as string]: WARN }} /> a mistake</span>
+          <span className="ml-auto flex flex-wrap items-center gap-3 text-slate-400">
+            <span className="flex items-center gap-1.5"><span className="h-2.5 w-3.5 border" style={{ background: `${REAL}73`, borderColor: REAL }} /> Bona fide</span>
+            <span className="flex items-center gap-1.5"><span className="h-2.5 w-3.5 border" style={{ background: `${FAKE}73`, borderColor: FAKE }} /> Spoof</span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-2.5 w-3.5 border border-slate-800" style={{ background: "repeating-linear-gradient(45deg, rgba(15,23,42,.7) 0 1px, transparent 1px 4px)" }} /> Misclassified
+            </span>
+            <span className="flex items-center gap-1.5"><span className="w-4 border-t border-dashed" style={{ borderColor: MID }} /> <span>τ<sub>EER</sub></span></span>
+            <span className="flex items-center gap-1.5"><span className="w-4 border-t border-dotted border-slate-500" /> <span>τ<sub>op</sub></span></span>
           </span>
         </div>
 
@@ -194,14 +211,14 @@ export const DetectorReport = ({
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <div className="df-glass rounded-3xl p-5">
-          <h4 className="font-display text-lg font-semibold text-white">The trade-off curve</h4>
+        <div className="df-glass p-3">
+          <h4 className="font-display text-lg font-semibold text-white">Detection error trade-off (DET)</h4>
           <p className="mb-3 text-sm text-slate-400">
-            Every possible cut is one point. The white dot is yours; the ringed dot is where both errors match.
+            FAR against FRR across every threshold. The circle marks the equal error rate, the square the current τ, and the dashed line FAR = FRR.
           </p>
-          {live && <DetChart points={result.det_curve} live={live} eerPercent={result.eer_percent} />}
+          {live && <DetChart points={result.det_curve} live={live} threshold={cut} eerPercent={result.eer_percent} />}
         </div>
-        <div className="df-glass rounded-3xl p-5">
+        <div className="df-glass p-3">
           <h4 className="font-display text-lg font-semibold text-white">Which voice generators fool it?</h4>
           <p className="mb-4 text-sm text-slate-400">
             Average score per generator. Shorter bars look more real to the detector.
@@ -224,38 +241,37 @@ export const DetectorReport = ({
           <div><dt className="text-slate-400">cut in use</dt><dd className="font-mono text-white">{result.operating_point.threshold.toFixed(2)}{result.operating_point.calibrated ? "" : " (uncalibrated)"}</dd></div>
           <div><dt className="text-slate-400">FAR / FRR at it</dt><dd className="font-mono text-white">{(result.operating_point.false_acceptance_rate * 100).toFixed(1)}% / {(result.operating_point.false_rejection_rate * 100).toFixed(1)}%</dd></div>
           {live && (
-            <div className="col-span-2"><dt className="text-slate-400">at your cut ({live.threshold.toFixed(3)})</dt><dd className="font-mono text-white">FAR {(live.false_acceptance_rate * 100).toFixed(1)}% · FRR {(live.false_rejection_rate * 100).toFixed(1)}%</dd></div>
+            <div className="col-span-2"><dt className="text-slate-400">at your cut ({cut.toFixed(3)})</dt><dd className="font-mono text-white">FAR {(live.false_acceptance_rate * 100).toFixed(1)}%, FRR {(live.false_rejection_rate * 100).toFixed(1)}%</dd></div>
           )}
           <div><dt className="text-slate-400">scored</dt><dd className="font-mono text-white">{result.scored} clips</dd></div>
           <div><dt className="text-slate-400">dataset</dt><dd className="font-mono text-white">{result.dataset_id}</dd></div>
         </dl>
         <p className="text-xs text-slate-400">
           Histogram bar heights use a square-root scale so small bins stay visible next to large ones. The DET curve
-          is on linear axes; &ldquo;acceptance&rdquo; means accepted as genuine (the ASVspoof convention). Your cut
-          snaps to the nearest threshold the backend evaluated. Generator ids are ASVspoof 2019 LA attack systems.
+          defaults to normal-deviate (probit) axes, as in ASVspoof and NIST evaluations; error rates of zero cannot be
+          placed on that scale and are drawn on the axis floor, half the smallest non-zero rate. &ldquo;Acceptance&rdquo;
+          means accepted as genuine (the ASVspoof convention). Rates at your
+          cut are exact: decisions only change at a clip&rsquo;s score, so they equal those at the next evaluated threshold. Generator ids are ASVspoof 2019 LA attack systems.
         </p>
       </Disclosure>
     </motion.div>
   );
 };
 
-const BigStat = ({ label, value, hint, colour }: { label: string; value: ReactNode; hint: string; colour: string }) => {
-  const { theme } = useDfTheme();
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true }}
-      className="df-glass rounded-3xl p-5"
-    >
-      <div className="text-sm text-slate-300">{label}</div>
-      <div className="font-display text-5xl font-semibold tabular-nums" style={{ color: colour, textShadow: theme === "dark" ? `0 0 30px ${colour}66` : undefined }}>
-        {value}
-      </div>
-      <div className="text-xs text-slate-500">{hint}</div>
-    </motion.div>
-  );
-};
+const BigStat = ({ label, value, hint, colour }: { label: string; value: ReactNode; hint: string; colour: string }) => (
+  <motion.div
+    initial={{ opacity: 0, y: 12 }}
+    whileInView={{ opacity: 1, y: 0 }}
+    viewport={{ once: true }}
+    className="df-glass p-3"
+  >
+    <div className="text-xs text-slate-400">{label}</div>
+    <div className="font-mono text-2xl font-semibold tabular-nums" style={{ color: colour }}>
+      {value}
+    </div>
+    <div className="text-xs text-slate-500">{hint}</div>
+  </motion.div>
+);
 
 const Mistake = ({ count, total, text, colour }: { count: number; total: number; text: string; colour: string }) => {
   const { WARN, ink } = usePalette();

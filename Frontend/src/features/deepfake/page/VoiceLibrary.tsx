@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
-import { Pause, Play, Search } from "lucide-react";
+import { motion } from "motion/react";
+import { ArrowDown, ArrowUp, ChevronsUpDown, Pause, Play, Search } from "lucide-react";
 import type { EmbeddingRecording, RecordingInfo } from "../types";
 import { audioUrlFor, formatBytes, formatSeconds } from "./api";
 import { preview, usePreviewUrl } from "./audio";
 import { usePalette } from "./theme";
+import { formatScore } from "./palette";
 
-type Sort = "name" | "length" | "score";
+type Column = "name" | "length" | "size" | "score";
+type Direction = "asc" | "desc";
 type Lean = "all" | "real" | "synthetic";
 
 interface VoiceLibraryProps {
@@ -18,18 +20,29 @@ interface VoiceLibraryProps {
   onSelect: (recordingId: string) => void;
 }
 
+const COLUMNS: { id: Column; label: string; align: "left" | "right"; numeric: boolean }[] = [
+  { id: "name", label: "Clip", align: "left", numeric: false },
+  { id: "length", label: "Length", align: "right", numeric: true },
+  { id: "size", label: "Size", align: "right", numeric: true },
+  { id: "score", label: "Spoof score", align: "right", numeric: true },
+];
+
 /**
- * The whole dataset laid out on the page — no inner scroll box. Every clip is
- * a card you can preview in place or send up to the verdict panel.
+ * The dataset as a table — the whole of it, laid out on the page with no inner
+ * scroll box, so scrolling the page reads the dataset. Sortable columns and a
+ * search box for a researcher; a play button and plain "reads as" wording so
+ * anyone can use it.
+ *
+ * The score column is the DETECTOR's output, and it is empty until the voice
+ * map has been drawn; the dataset's own bona fide/spoof answer is never here.
  */
 export const VoiceLibrary = ({ recordings, scores, threshold, selectedId, onSelect }: VoiceLibraryProps) => {
-  const { scoreColor } = usePalette();
+  const { scoreColor, ink } = usePalette();
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<Sort>("name");
+  const [sort, setSort] = useState<{ column: Column; direction: Direction }>({ column: "name", direction: "asc" });
   const [lean, setLean] = useState<Lean>("all");
   const playingUrl = usePreviewUrl();
   const scored = scores.size > 0 && threshold !== null;
-  const longest = useMemo(() => Math.max(1, ...recordings.map((recording) => recording.duration_seconds ?? 0)), [recordings]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -40,172 +53,209 @@ export const VoiceLibrary = ({ recordings, scores, threshold, selectedId, onSele
       if (score === undefined) return false;
       return lean === "synthetic" ? score >= threshold! : score < threshold!;
     });
-    const by: Record<Sort, (a: RecordingInfo, b: RecordingInfo) => number> = {
-      name: (a, b) => a.display_filename.localeCompare(b.display_filename),
-      length: (a, b) => (b.duration_seconds ?? 0) - (a.duration_seconds ?? 0),
-      score: (a, b) =>
-        (scores.get(b.recording_id)?.spoof_probability ?? -1) - (scores.get(a.recording_id)?.spoof_probability ?? -1),
+    const value: Record<Column, (recording: RecordingInfo) => number | string> = {
+      name: (recording) => recording.display_filename,
+      length: (recording) => recording.duration_seconds ?? 0,
+      size: (recording) => recording.size_bytes,
+      score: (recording) => scores.get(recording.recording_id)?.spoof_probability ?? -1,
     };
-    return [...rows].sort(by[sort]);
+    const read = value[sort.column];
+    const factor = sort.direction === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      // unscored clips sort last in either direction
+      if (sort.column === "score") {
+        const unscoredA = !scores.has(a.recording_id);
+        const unscoredB = !scores.has(b.recording_id);
+        if (unscoredA !== unscoredB) return unscoredA ? 1 : -1;
+      }
+      const left = read(a);
+      const right = read(b);
+      if (typeof left === "string" && typeof right === "string") return left.localeCompare(right) * factor;
+      return ((left as number) - (right as number)) * factor;
+    });
   }, [recordings, query, sort, lean, scores, scored, threshold]);
 
+  const toggleSort = (column: Column) =>
+    setSort((current) =>
+      current.column === column
+        ? { column, direction: current.direction === "asc" ? "desc" : "asc" }
+        : { column, direction: column === "name" ? "asc" : "desc" },
+    );
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="relative min-w-[220px] flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+    <div className="df-glass">
+      {/* filters */}
+      <div className="df-panel-head flex flex-wrap items-center gap-2 px-3 py-2">
+        <label className="relative min-w-[200px] flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search clips by name…"
+            placeholder="Search clips by name"
             aria-label="Search clips"
-            className="w-full rounded-full border border-white/10 bg-white/5 py-2.5 pl-9 pr-4 text-sm text-white placeholder:text-slate-500 focus:border-cyan-300/60 focus:outline-none"
+            className="h-7 w-full rounded-sm border border-border bg-white/5 pl-8 pr-2 text-xs text-white placeholder:text-slate-500 focus:border-cyan-300/60 focus:outline-none"
           />
         </label>
-        <Segmented
-          label="Sort"
-          value={sort}
-          onChange={(next) => setSort(next as Sort)}
-          options={[
-            { id: "name", label: "Name" },
-            { id: "length", label: "Longest" },
-            ...(scored ? [{ id: "score" as Sort, label: "Most synthetic" }] : []),
-          ]}
-        />
+
         {scored && (
-          <Segmented
-            label="Filter"
-            value={lean}
-            onChange={(next) => setLean(next as Lean)}
-            options={[
-              { id: "all", label: "All" },
-              { id: "real", label: "Sounds real" },
-              { id: "synthetic", label: "Sounds synthetic" },
-            ]}
-          />
+          <div className="flex rounded-sm border border-border" role="radiogroup" aria-label="Filter by what the detector hears">
+            {(
+              [
+                { id: "all", label: "All" },
+                { id: "real", label: "Sounds real" },
+                { id: "synthetic", label: "Sounds synthetic" },
+              ] as const
+            ).map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                role="radio"
+                aria-checked={lean === option.id}
+                onClick={() => setLean(option.id)}
+                className="px-2.5 py-1 text-xs font-medium text-slate-400 transition-colors first:rounded-l-sm last:rounded-r-sm hover:text-white aria-checked:bg-white/10 aria-checked:text-white"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         )}
-        <span className="text-sm text-slate-400">
+
+        <span className="text-xs tabular-nums text-slate-400">
           {visible.length} of {recordings.length} clips
         </span>
       </div>
+
       {!scored && (
-        <p className="text-xs text-slate-500">Map the voices above to see each clip&apos;s score here and filter by it.</p>
+        <p className="border-b border-border px-3 py-1.5 text-xs text-slate-500">
+          The spoof score column fills in once the voice map has scored the dataset with this detector.
+        </p>
       )}
 
-      <motion.ul layout className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-        <AnimatePresence initial={false}>
-          {visible.map((recording, index) => {
+      <motion.table
+        initial={{ opacity: 0 }}
+        whileInView={{ opacity: 1 }}
+        viewport={{ once: true }}
+        className="w-full border-collapse text-xs"
+      >
+        <thead>
+          <tr className="border-b border-border text-left">
+            <th scope="col" className="w-9 px-2 py-1.5">
+              <span className="sr-only">Preview</span>
+            </th>
+            {COLUMNS.map((column) => {
+              const active = sort.column === column.id;
+              return (
+                <th
+                  key={column.id}
+                  scope="col"
+                  aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
+                  className={`px-2 py-1.5 font-semibold ${column.align === "right" ? "text-right" : "text-left"}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => toggleSort(column.id)}
+                    className={`inline-flex items-center gap-1 transition-colors hover:text-white ${
+                      active ? "text-white" : "text-slate-400"
+                    } ${column.align === "right" ? "flex-row-reverse" : ""}`}
+                  >
+                    {column.label}
+                    {active ? (
+                      sort.direction === "asc" ? (
+                        <ArrowUp className="h-3 w-3" />
+                      ) : (
+                        <ArrowDown className="h-3 w-3" />
+                      )
+                    ) : (
+                      <ChevronsUpDown className="h-3 w-3 opacity-50" />
+                    )}
+                  </button>
+                </th>
+              );
+            })}
+            <th scope="col" className="px-2 py-1.5 text-left font-semibold text-slate-400">
+              Reads as
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {visible.map((recording) => {
             const point = scores.get(recording.recording_id);
-            // Unscored clips share the neutral accent; the score only colours a card once the map has run.
-            const colour = point ? scoreColor(point.spoof_probability) : "var(--df-accent)";
             const synthetic = point && threshold !== null ? point.spoof_probability >= threshold : null;
-            const lengthShare = Math.min(1, (recording.duration_seconds ?? 0) / longest);
+            const colour = point ? scoreColor(point.spoof_probability) : undefined;
             const selected = recording.recording_id === selectedId;
             const url = audioUrlFor(recording.recording_id);
             const playing = playingUrl === url;
             return (
-              <motion.li
-                layout
+              <tr
                 key={recording.recording_id}
-                initial={{ opacity: 0, y: 16, scale: 0.96 }}
-                whileInView={{ opacity: 1, y: 0, scale: 1 }}
-                viewport={{ once: true, margin: "-40px" }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                transition={{ duration: 0.35, delay: (index % 10) * 0.025 }}
+                className={`border-b border-border/70 last:border-0 ${selected ? "bg-cyan-400/10" : "hover:bg-white/5"}`}
               >
-                <div
-                  className={`group relative flex items-center gap-3 overflow-hidden rounded-2xl p-3 transition-all ${
-                    selected ? "bg-white/10 ring-2" : "bg-white/[0.035] ring-1 ring-white/10 hover:bg-white/[0.07]"
-                  }`}
-                  style={selected ? { boxShadow: `0 0 30px -8px ${colour}`, ["--tw-ring-color" as string]: colour } : undefined}
-                >
-                  {/* score wash + stripe */}
-                  <span
-                    className="pointer-events-none absolute inset-0"
-                    style={{ background: `linear-gradient(90deg, color-mix(in srgb, ${colour} ${point ? 14 : 7}%, transparent), transparent 70%)` }}
-                    aria-hidden
-                  />
-                  <span className="absolute inset-y-0 left-0 w-1" style={{ background: colour }} aria-hidden />
-                  {/* relative clip length */}
-                  <span
-                    className="pointer-events-none absolute bottom-0 left-1 h-0.5 opacity-60"
-                    style={{ width: `calc((100% - 0.25rem) * ${lengthShare})`, background: colour }}
-                    aria-hidden
-                  />
+                <td className="px-2 py-1">
                   <button
                     type="button"
                     onClick={() => preview.toggle(url)}
                     aria-label={`${playing ? "Stop" : "Preview"} ${recording.display_filename}`}
-                    className="relative grid h-10 w-10 shrink-0 place-items-center rounded-full transition hover:scale-110"
-                    style={{
-                      color: colour,
-                      background: `color-mix(in srgb, ${colour} 16%, transparent)`,
-                      boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${colour} 35%, transparent)`,
-                    }}
+                    className="grid h-6 w-6 place-items-center rounded-sm text-slate-400 transition-colors hover:bg-white/10 hover:text-white"
                   >
-                    {playing && <span className="df-ripple absolute inset-0 rounded-full border border-cyan-300" aria-hidden />}
-                    {playing ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
+                    {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
                   </button>
+                </td>
+                <td className="px-2 py-1">
                   <button
                     type="button"
                     onClick={() => onSelect(recording.recording_id)}
                     aria-pressed={selected}
-                    className="min-w-0 flex-1 text-left"
+                    className={`max-w-full truncate font-mono transition-colors hover:text-cyan-300 ${
+                      selected ? "font-semibold text-cyan-300" : "text-white"
+                    }`}
+                    title="Study this clip"
                   >
-                    <div className="truncate font-mono text-sm text-white">{recording.display_filename}</div>
-                    <div className="flex items-center gap-2 text-[11px] text-slate-400">
-                      <span>{formatSeconds(recording.duration_seconds)}</span>
-                      <span>·</span>
-                      <span>{formatBytes(recording.size_bytes)}</span>
-                      {point && (
-                        <span
-                          className="ml-auto rounded-full px-1.5 py-px font-mono font-semibold"
-                          style={{ color: colour, background: `color-mix(in srgb, ${colour} 14%, transparent)` }}
-                          title={synthetic === null ? undefined : synthetic ? "Sounds synthetic" : "Sounds real"}
-                        >
-                          {point.spoof_probability.toFixed(2)}
-                        </span>
-                      )}
-                    </div>
+                    {recording.display_filename}
                   </button>
-                </div>
-              </motion.li>
+                </td>
+                <td className="px-2 py-1 text-right tabular-nums text-slate-400">
+                  {formatSeconds(recording.duration_seconds)}
+                </td>
+                <td className="px-2 py-1 text-right tabular-nums text-slate-400">{formatBytes(recording.size_bytes)}</td>
+                <td className="px-2 py-1">
+                  {point ? (
+                    <div className="flex items-center justify-end gap-2">
+                      {/* the score on a shared 0..1 axis, so the column reads as a distribution */}
+                      <span className="hidden h-1.5 w-16 overflow-hidden rounded-sm sm:block" style={{ background: ink(0.08) }} aria-hidden>
+                        <span
+                          className="block h-full"
+                          style={{ width: `${point.spoof_probability * 100}%`, background: colour }}
+                        />
+                      </span>
+                      <span className="w-16 text-right font-mono tabular-nums" style={{ color: colour }}>
+                        {formatScore(point.spoof_probability, 2)}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="text-right text-slate-500">n/a</div>
+                  )}
+                </td>
+                <td className="px-2 py-1">
+                  {synthetic === null ? (
+                    <span className="text-slate-500" title="Score this dataset with the voice map above">
+                      &mdash;
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5" style={{ color: colour }}>
+                      <span className="h-1.5 w-1.5 rounded-full" style={{ background: colour }} />
+                      {synthetic ? "Sounds synthetic" : "Sounds real"}
+                    </span>
+                  )}
+                </td>
+              </tr>
             );
           })}
-        </AnimatePresence>
-      </motion.ul>
+        </tbody>
+      </motion.table>
+
+      {visible.length === 0 && (
+        <p className="px-3 py-6 text-center text-xs text-slate-500">No clip matches these filters.</p>
+      )}
     </div>
   );
 };
-
-function Segmented<T extends string>({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: T;
-  onChange: (value: T) => void;
-  options: { id: T; label: string }[];
-}) {
-  return (
-    <div className="flex rounded-full bg-white/5 p-1 ring-1 ring-white/10" role="radiogroup" aria-label={label}>
-      {options.map((option) => (
-        <button
-          key={option.id}
-          type="button"
-          role="radio"
-          aria-checked={value === option.id}
-          onClick={() => onChange(option.id)}
-          className="relative rounded-full px-3 py-1 text-xs font-semibold text-slate-300 transition-colors hover:text-white aria-checked:text-slate-950"
-        >
-          {value === option.id && (
-            <motion.span layoutId={`df-seg-${label}`} className="df-pill absolute inset-0 rounded-full" transition={{ type: "spring", stiffness: 400, damping: 30 }} />
-          )}
-          <span className="relative">{option.label}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
