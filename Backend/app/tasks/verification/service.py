@@ -8,7 +8,9 @@ the rest of the VoxLIT API can still start without downloading SV weights.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import sys
 import threading
 from dataclasses import asdict, dataclass
 from itertools import combinations
@@ -173,6 +175,37 @@ class _ECAPAAdapter(_BaseAdapter):
         return self.validate_embedding(embedding)
 
 
+@contextlib.contextmanager
+def _shield_speechbrain_lazy_modules():
+    """Shield inspect.stack() from SpeechBrain's unresolvable LazyModules.
+
+    When speechbrain is imported (e.g. by ECAPA-TDNN), it injects
+    DeprecatedModuleRedirect / LazyModule stubs into sys.modules (e.g.
+    speechbrain.integrations.k2_fsa, speechbrain.integrations.nlp).
+    PyTorch Lightning's load_from_checkpoint calls inspect.stack(), which in
+    Python 3 invokes hasattr(m, '__file__') across all sys.modules values,
+    in turn triggering those lazy imports. On platforms without k2 or flair
+    wheels (like Windows), this raises an unhandled ImportError.
+    Temporarily stashing them prevents inspect from tripping over them.
+    """
+    stashed: dict[str, object] = {}
+    try:
+        from speechbrain.utils.importutils import DeprecatedModuleRedirect, LazyModule
+
+        lazy_types: tuple[type, ...] = (LazyModule, DeprecatedModuleRedirect)
+    except ImportError:
+        lazy_types = ()
+
+    if lazy_types:
+        for name, mod in list(sys.modules.items()):
+            if isinstance(mod, lazy_types):
+                stashed[name] = sys.modules.pop(name)
+    try:
+        yield
+    finally:
+        sys.modules.update(stashed)
+
+
 class _WeSpeakerAdapter(_BaseAdapter):
     def __init__(self, spec: SpeakerModelSpec) -> None:
         super().__init__(spec.embedding_dimension)
@@ -194,7 +227,8 @@ class _WeSpeakerAdapter(_BaseAdapter):
         os.environ["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] = "1"
         try:
             checkpoint = f"{spec.model_id}@{spec.revision}"
-            model = Model.from_pretrained(checkpoint, cache_dir=str(hf_cache_dir))
+            with _shield_speechbrain_lazy_modules():
+                model = Model.from_pretrained(checkpoint, cache_dir=str(hf_cache_dir))
         except Exception as error:
             raise SpeakerModelUnavailable(f"Could not load ResNet34-LM: {error}") from error
         finally:
