@@ -16,6 +16,7 @@ import { Play, ChevronLeft, ChevronRight } from "lucide-react";
 import { useMemo, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import { isDeepfakeDemoDataset } from "@/tasks/registry";
+import { formatClusterLabel } from "@/features/verification/formatSpeakerLabel";
 
 interface UploadedFile {
   file_id: string;
@@ -370,14 +371,15 @@ export const AudioDataTable = ({ selectedRow, onRowSelect, searchQuery, apiData,
       id: "cluster",
       accessorFn: (row: any) => {
         const rowId = 'file_id' in row ? (row as AudioData).id : getDatasetRowId(row as DatasetRow, "");
-        return clusterMap?.[rowId] ?? "";
+        const clusterId = clusterMap?.[rowId];
+        return clusterId ? formatClusterLabel(clusterId) : "";
       },
-      header: "Cluster",
+      header: "Speaker",
       cell: ({ row }) => {
         const rowId = row.id as string;
         const clusterId = clusterMap?.[rowId];
         if (!clusterId) return <span className="text-xs text-muted-foreground">—</span>;
-        return <span className="font-mono text-xs">{clusterId}</span>;
+        return <span className="font-mono text-xs">{formatClusterLabel(clusterId)}</span>;
       },
     },
     {

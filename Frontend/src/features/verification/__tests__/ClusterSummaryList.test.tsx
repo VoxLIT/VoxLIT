@@ -49,7 +49,7 @@ const mockColorMap: Record<string, string> = {
 describe("ClusterSummaryList", () => {
   it("renders empty state when clusterSummaries is empty", () => {
     render(<ClusterSummaryList clusterSummaries={[]} clusterColorMap={{}} />);
-    expect(screen.getByText("No clusters to display.")).toBeInTheDocument();
+    expect(screen.getByText("No speakers to display.")).toBeInTheDocument();
   });
 
   it("sorts clusters by member count descending", () => {
@@ -64,11 +64,11 @@ describe("ClusterSummaryList", () => {
     expect(clusterButtons).toHaveLength(3);
 
     // Cluster 1 has 5 members, should be first
-    expect(clusterButtons[0]).toHaveTextContent("Cluster 1");
+    expect(clusterButtons[0]).toHaveTextContent("Speaker 1");
     // Cluster 2 has 2 members, should be second
-    expect(clusterButtons[1]).toHaveTextContent("Cluster 2");
+    expect(clusterButtons[1]).toHaveTextContent("Speaker 2");
     // Cluster 3 has 1 member, should be third
-    expect(clusterButtons[2]).toHaveTextContent("Cluster 3");
+    expect(clusterButtons[2]).toHaveTextContent("Speaker 3");
   });
 
   it("renders 'Not applicable' for single-clip clusters with null similarities", () => {
@@ -94,7 +94,7 @@ describe("ClusterSummaryList", () => {
       />
     );
 
-    const cluster1Button = screen.getByLabelText("Focus Cluster 1, 5 recordings");
+    const cluster1Button = screen.getByLabelText("Focus Speaker 1, 5 recordings");
     fireEvent.click(cluster1Button);
 
     expect(onFocusChange).toHaveBeenCalledWith("Cluster 1");
@@ -111,7 +111,7 @@ describe("ClusterSummaryList", () => {
       />
     );
 
-    const cluster1Button = screen.getByLabelText("Focus Cluster 1, 5 recordings");
+    const cluster1Button = screen.getByLabelText("Focus Speaker 1, 5 recordings");
     fireEvent.click(cluster1Button);
 
     expect(onFocusChange).toHaveBeenCalledWith(null);

@@ -45,14 +45,14 @@ describe("ClusterAssignmentResults", () => {
   it("renders prompt when no file is selected", () => {
     render(<ClusterAssignmentResults selectedFile={null} />);
     expect(
-      screen.getByText("Select a recording to see its cluster assignment.")
+      screen.getByText("Select a recording to see its speaker assignment.")
     ).toBeInTheDocument();
   });
 
   it("renders batch run notice when no batch snapshot is published", () => {
     render(<ClusterAssignmentResults selectedFile={mockFile} />);
     expect(
-      screen.getByText("Run a batch analysis to see cluster assignment results.")
+      screen.getByText("Run a batch analysis to see speaker assignment results.")
     ).toBeInTheDocument();
   });
 
@@ -74,10 +74,10 @@ describe("ClusterAssignmentResults", () => {
     render(<ClusterAssignmentResults selectedFile={mockFile} />);
 
     // Header
-    expect(screen.getByText("Cluster assignment results")).toBeInTheDocument();
+    expect(screen.getByText("Speaker assignment results")).toBeInTheDocument();
 
     // Predicted cluster
-    expect(screen.getByText("Cluster 1")).toBeInTheDocument();
+    expect(screen.getByText("Speaker 1")).toBeInTheDocument();
 
     // Ground truth group is not rendered
     expect(screen.queryByText("Ground-truth speaker group")).not.toBeInTheDocument();

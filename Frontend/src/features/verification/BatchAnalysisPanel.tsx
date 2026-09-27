@@ -11,6 +11,7 @@ import { ClusterSummaryList } from "./ClusterSummaryList";
 import { PairComparisonCard } from "./PairComparisonCard";
 import { buildClusterColorMap } from "./clusterColors";
 import { clusterAssignmentStore } from "./clusterAssignmentStore";
+import { formatClusterLabel } from "./formatSpeakerLabel";
 import type {
   BatchAnalysisResponse,
   BatchExportRequestBody,
@@ -300,7 +301,7 @@ export const BatchAnalysisPanel = ({
             displayFilename: resolveRecordingLabel(label),
             coordinates: projection.coordinates[i],
             color: clusterColorMap[batchResult.cluster_labels[i]] ?? "#3b82f6",
-            hoverExtra: `${batchResult.cluster_labels[i]} • fit ${batchResult.cluster_fit_scores[i].toFixed(2)}`,
+            hoverExtra: `${formatClusterLabel(batchResult.cluster_labels[i])} • fit ${batchResult.cluster_fit_scores[i].toFixed(2)}`,
             clusterId: batchResult.cluster_labels[i],
           })),
         });
