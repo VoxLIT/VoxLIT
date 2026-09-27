@@ -3,7 +3,7 @@ import { MousePointerClick, Pause, Play } from "lucide-react";
 import type { EmbeddingRecording, RecordingInfo } from "../types";
 import { audioUrlFor, formatBytes, formatSeconds } from "./api";
 import { preview, usePreviewUrl } from "./audio";
-import { leanWords } from "./palette";
+import { leanWords, formatScore } from "./palette";
 import { usePalette } from "./theme";
 import { VerdictChip } from "./ui";
 
@@ -56,7 +56,7 @@ export const PointPopup = ({ point, info, threshold, selected, left, top, origin
         <div className="mt-3 flex items-center justify-between">
           <VerdictChip spoof={spoof} size="sm" />
           <span className="font-mono text-lg font-semibold tabular-nums" style={{ color: colour }}>
-            {point.spoof_probability.toFixed(3)}
+            {formatScore(point.spoof_probability)}
           </span>
         </div>
 
@@ -82,11 +82,11 @@ export const PointPopup = ({ point, info, threshold, selected, left, top, origin
           </div>
           <div>
             <dt className="text-slate-500">size</dt>
-            <dd className="font-mono text-slate-200">{info ? formatBytes(info.size_bytes) : "—"}</dd>
+            <dd className="font-mono text-slate-200">{info ? formatBytes(info.size_bytes) : "n/a"}</dd>
           </div>
           <div>
             <dt className="text-slate-500">format</dt>
-            <dd className="font-mono text-slate-200">{info?.extension ?? "—"}</dd>
+            <dd className="font-mono text-slate-200">{info?.extension ?? "n/a"}</dd>
           </div>
         </dl>
 

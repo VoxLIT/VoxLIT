@@ -16,15 +16,15 @@ export const Disclosure = ({
   const [open, setOpen] = useState(defaultOpen);
   const id = useId();
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.02]">
+    <div className="rounded-sm border border-border bg-white/[0.02]">
       <button
         type="button"
         aria-expanded={open}
         aria-controls={id}
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-300 transition-colors hover:text-white"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-slate-300 transition-colors hover:text-white"
       >
-        <Microscope className="h-4 w-4 text-violet-300" />
+        <Microscope className="h-3.5 w-3.5 text-violet-300" />
         <span className="flex-1">{title}</span>
         <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ type: "spring", stiffness: 300, damping: 22 }}>
           <ChevronDown className="h-4 w-4" />
@@ -41,7 +41,7 @@ export const Disclosure = ({
             transition={{ duration: 0.3, ease: [0.2, 0.7, 0.3, 1] }}
             className="overflow-hidden"
           >
-            <div className="space-y-3 border-t border-white/10 px-4 py-3 text-sm text-slate-300">{children}</div>
+            <div className="space-y-2 border-t border-border px-3 py-2.5 text-xs text-slate-300">{children}</div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -63,11 +63,11 @@ export const SectionTitle = ({
     whileInView={{ opacity: 1, y: 0 }}
     viewport={{ once: true, margin: "-80px" }}
     transition={{ duration: 0.6, ease: [0.2, 0.7, 0.3, 1] }}
-    className="mb-6 max-w-3xl"
+    className="mb-3 max-w-4xl"
   >
-    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-300/80">{eyebrow}</div>
-    <h2 className="font-display text-3xl font-semibold text-white sm:text-4xl">{title}</h2>
-    {children && <p className="mt-2 text-base text-slate-300">{children}</p>}
+    <div className="text-[10px] font-semibold uppercase tracking-wider text-cyan-300/80">{eyebrow}</div>
+    <h2 className="font-display text-base font-bold text-white">{title}</h2>
+    {children && <p className="mt-1 text-xs text-slate-400">{children}</p>}
   </motion.div>
 );
 
@@ -84,7 +84,7 @@ export const FeatureImage = ({
   className?: string;
 }) => (
   <figure
-    className={`group overflow-hidden rounded-2xl border border-white/10 ${className.includes("absolute") ? "" : "relative"} ${className}`}
+    className={`group overflow-hidden rounded-sm border border-border ${className.includes("absolute") ? "" : "relative"} ${className}`}
   >
     <motion.img
       src={src}
@@ -108,8 +108,8 @@ export const VerdictChip = ({ spoof, size = "md" }: { spoof: boolean; size?: "sm
   const { REAL, FAKE } = usePalette();
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full font-semibold ${
-        size === "sm" ? "px-2 py-0.5 text-[11px]" : "px-3 py-1 text-xs"
+      className={`inline-flex items-center gap-1.5 rounded-sm font-semibold ${
+        size === "sm" ? "px-1.5 py-0.5 text-[11px]" : "px-2 py-0.5 text-xs"
       }`}
       style={{
         color: spoof ? FAKE : REAL,
@@ -128,7 +128,7 @@ export const ErrorNote = ({ children }: { children: ReactNode }) => (
     role="alert"
     initial={{ opacity: 0, y: -6 }}
     animate={{ opacity: 1, y: 0 }}
-    className="flex items-start gap-2 rounded-xl border border-rose-400/30 bg-rose-500/10 p-3 text-sm text-rose-200"
+    className="flex items-start gap-2 rounded-sm border border-rose-400/30 bg-rose-500/10 p-2.5 text-xs text-rose-200"
   >
     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
     <span>{children}</span>
@@ -141,14 +141,12 @@ export const Finding = ({ alarming, title, detail }: { alarming: boolean; title:
     initial={{ opacity: 0, y: 10 }}
     animate={{ opacity: 1, y: 0 }}
     transition={{ delay: 0.2 }}
-    className={`rounded-2xl border p-4 ${
+    className={`rounded-sm border p-3 ${
       alarming ? "border-amber-300/40 bg-amber-400/10" : "border-emerald-300/30 bg-emerald-400/10"
     }`}
   >
-    <div className={`font-display text-lg font-semibold ${alarming ? "text-amber-200" : "text-emerald-200"}`}>
-      {title}
-    </div>
-    <p className="mt-1 text-sm text-slate-300">{detail}</p>
+    <div className={`text-sm font-bold ${alarming ? "text-amber-200" : "text-emerald-200"}`}>{title}</div>
+    <p className="mt-1 text-xs text-slate-300">{detail}</p>
   </motion.div>
 );
 
@@ -169,11 +167,10 @@ export const PrimaryButton = ({
     type="button"
     onClick={onClick}
     disabled={disabled || busy}
-    whileHover={disabled || busy ? undefined : { scale: 1.03 }}
-    whileTap={disabled || busy ? undefined : { scale: 0.97 }}
-    className={`relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-full df-primary-btn px-5 py-2.5 text-sm font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+    whileTap={disabled || busy ? undefined : { scale: 0.98 }}
+    className={`relative inline-flex items-center justify-center gap-1.5 overflow-hidden df-primary-btn px-3 py-1.5 text-xs font-semibold transition-opacity disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
   >
     {busy && <span className="df-scan absolute inset-y-0 left-0 w-1/4 bg-white/40 blur-md" aria-hidden />}
-    <span className="relative inline-flex items-center gap-2">{children}</span>
+    <span className="relative inline-flex items-center gap-1.5">{children}</span>
   </motion.button>
 );

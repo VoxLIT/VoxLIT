@@ -140,7 +140,7 @@ export const WaveformPlayer = ({ url, label }: { url: string; label: string }) =
         </div>
         <div className="mt-1 flex justify-between font-mono text-[11px] text-slate-400">
           <span>{time.toFixed(1)}s</span>
-          <span>{total ? `${total.toFixed(1)}s` : "…"}</span>
+          <span>{total ? `${total.toFixed(1)}s` : "0.0s"}</span>
         </div>
       </div>
 

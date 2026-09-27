@@ -5,7 +5,7 @@ import type { DeepfakeResult, DeepfakeSaliency, RecordingInfo, SilenceProbeResul
 import { readSaliencyVerdict } from "../SaliencyPanel";
 import { readProbeVerdict } from "../SilenceProbeCard";
 import { errorMessage, isUserClip, postDeepfake } from "./api";
-import { leanWords } from "./palette";
+import { leanWords, formatScore } from "./palette";
 import { usePalette } from "./theme";
 import { ErrorNote, PrimaryButton, VerdictChip } from "./ui";
 
@@ -110,7 +110,7 @@ export const AllDetectors = ({ models, recording }: AllDetectorsProps) => {
 
   return (
     <div className="space-y-5">
-      <div className="df-glass flex flex-wrap items-center gap-4 rounded-3xl p-5">
+      <div className="df-glass flex flex-wrap items-center gap-4 p-3">
         <div className="min-w-0 flex-1">
           <div className="text-[11px] uppercase tracking-widest text-slate-400">
             {isUserClip(recording.recording_id) ? "Your clip" : "Dataset clip"}
@@ -123,9 +123,9 @@ export const AllDetectors = ({ models, recording }: AllDetectorsProps) => {
               </span>{" "}
               detector{verdicts.length === 1 ? "" : "s"} {synthetic === 1 ? "says" : "say"} synthetic
               {verdicts.length === models.length && (synthetic === 0 || synthetic === models.length)
-                ? " — they all agree."
+                ? ". They all agree."
                 : verdicts.length === models.length
-                  ? " — they disagree, so no single score should be trusted on its own."
+                  ? ". They disagree, so no single score should be trusted on its own."
                   : "."}
             </p>
           ) : (
@@ -136,7 +136,7 @@ export const AllDetectors = ({ models, recording }: AllDetectorsProps) => {
         </div>
         {!complete && (
           <PrimaryButton onClick={runAll} busy={runningAll}>
-            <Layers className="h-4 w-4" /> {runningAll ? "Working through the detectors…" : `Run everything on all ${models.length}`}
+            <Layers className="h-4 w-4" /> {runningAll ? "Running the detectors" : `Run everything on all ${models.length}`}
           </PrimaryButton>
         )}
       </div>
@@ -154,7 +154,7 @@ export const AllDetectors = ({ models, recording }: AllDetectorsProps) => {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ delay: index * 0.08 }}
-            className="df-glass flex min-w-0 flex-col gap-4 rounded-3xl p-5"
+            className="df-glass flex min-w-0 flex-col gap-3 p-3"
             data-testid="detector-card"
           >
             <div className="flex items-center gap-3">
@@ -232,7 +232,7 @@ const Block = ({
     {children ||
       (pending ? (
         <div className="flex items-center gap-2 py-2 text-xs text-slate-400">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Working…
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Working
         </div>
       ) : (
         <button
@@ -275,14 +275,14 @@ const VerdictBlock = ({ result }: { result: DeepfakeResult }) => {
       <div className="flex items-center justify-between gap-2">
         <VerdictChip spoof={spoof} size="sm" />
         <span className="font-mono text-lg font-semibold" style={{ color: scoreColor(result.spoof_probability) }}>
-          {result.spoof_probability.toFixed(3)}
+          {formatScore(result.spoof_probability)}
         </span>
       </div>
       <Bar score={result.spoof_probability} threshold={result.threshold} />
       <p className="text-xs text-slate-400">
-        {leanWords(result.spoof_probability, result.threshold)} {spoof ? "synthetic" : "real"} · threshold{" "}
+        {leanWords(result.spoof_probability, result.threshold)} {spoof ? "synthetic" : "real"}, threshold{" "}
         {result.threshold.toFixed(2)}
-        {result.truncated ? ` · first ${result.analysed_seconds}s scored` : ""}
+        {result.truncated ? `, first ${result.analysed_seconds}s scored` : ""}
       </p>
     </div>
   );
@@ -302,10 +302,10 @@ const SilenceBlock = ({ result }: { result: SilenceProbeResult }) => {
         const variant = result.variants[leg.key];
         const score = variant.applicable ? variant.spoof_probability : null;
         return (
-          <div key={leg.key} className="grid grid-cols-[84px_1fr_42px] items-center gap-2 text-xs">
+          <div key={leg.key} className="grid grid-cols-[84px_1fr_64px] items-center gap-2 text-xs">
             <span className="text-slate-400">{leg.label}</span>
             {score !== null ? <Bar score={score} threshold={result.threshold} /> : <span className="text-slate-500">not enough audio</span>}
-            <span className="text-right font-mono text-white">{score !== null ? score.toFixed(2) : "n/a"}</span>
+            <span className="text-right font-mono text-white">{score !== null ? formatScore(score, 2) : "n/a"}</span>
           </div>
         );
       })}
@@ -338,7 +338,7 @@ const HeatBlock = ({ result }: { result: DeepfakeSaliency }) => {
           />
         ))}
       </svg>
-      <p className="text-[11px] text-slate-500">Red = pushed towards synthetic · blue underline = speech</p>
+      <p className="text-[11px] text-slate-500">Red: pushed towards synthetic. Blue underline: speech.</p>
       {verdict && (
         <p className={`text-xs font-semibold ${verdict.alarming ? "text-amber-300" : "text-emerald-300"}`}>{verdict.title}</p>
       )}

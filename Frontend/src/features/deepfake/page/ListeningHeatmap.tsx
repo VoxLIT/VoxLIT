@@ -75,11 +75,11 @@ export const ListeningHeatmap = ({ model, recordingId }: { model: string; record
           <FeatureImage
             src="/deepfake/saliency.png"
             alt="A spectrogram of speech, showing energy over time and pitch"
-            caption="A heatmap over the sound shows which moments pushed the detector towards “synthetic”."
+            caption="A heatmap over the sound shows which moments pushed the detector towards synthetic."
             className="h-32"
           />
           <PrimaryButton onClick={run} busy={running} className="w-full">
-            <Flame className="h-4 w-4" /> {running ? "Tracing the attention…" : "Show the heatmap"}
+            <Flame className="h-4 w-4" /> {running ? "Tracing the attention" : "Show the heatmap"}
           </PrimaryButton>
         </>
       )}
@@ -195,7 +195,7 @@ export const ListeningHeatmap = ({ model, recordingId }: { model: string; record
             </p>
             <p className="text-xs text-slate-400">
               Analysis capped at {result.max_saliency_seconds}s (the shared saliency service&apos;s cap)
-              {result.truncated ? " — this clip was truncated to fit" : ""}. Voice regions found with an energy
+              {result.truncated ? " (this clip was truncated to fit)" : ""}. Voice regions found with an energy
               threshold {result.silence_top_db} dB below the clip&apos;s own peak.
               {result.saliency_in_speech_fraction !== null &&
                 ` Share of attention on voice: ${(result.saliency_in_speech_fraction * 100).toFixed(1)}%.`}

@@ -1,6 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { motion, useSpring, useTransform } from "motion/react";
 import { usePalette } from "./theme";
+import { formatScore } from "./palette";
 
 const R = 110;
 const CX = 140;
@@ -27,7 +28,13 @@ export const ScoreDial = ({ score, threshold }: { score: number; threshold: numb
   // from the element's own box rather than from the dial's hub.
   const tipX = useTransform(spring, (value) => polar(value, R - 8)[0]);
   const tipY = useTransform(spring, (value) => polar(value, R - 8)[1]);
-  const text = useTransform(spring, (value) => value.toFixed(3));
+  // While the needle swings (and overshoots past 0 or 1) show plain decimals;
+  // once it lands, the exact reading.
+  const target = useRef(score);
+  target.current = score;
+  const text = useTransform(spring, (value) =>
+    Math.abs(value - target.current) < 5e-4 ? formatScore(target.current) : Math.max(0, Math.min(1, value)).toFixed(3),
+  );
   const arcLength = useTransform(spring, (value) => value);
 
   const [tx1, ty1] = polar(threshold, R - 18);
@@ -35,7 +42,7 @@ export const ScoreDial = ({ score, threshold }: { score: number; threshold: numb
 
   return (
     <div className="relative mx-auto w-full max-w-[300px]">
-      <svg viewBox="0 0 280 170" className="w-full" role="img" aria-label={`Spoof score ${score.toFixed(3)} on a 0 to 1 dial`}>
+      <svg viewBox="0 0 280 170" className="w-full" role="img" aria-label={`Spoof score ${formatScore(score)} on a 0 to 1 dial`}>
         <defs>
           <linearGradient id="df-dial" x1="0" x2="1" y1="0" y2="0">
             <stop offset="0%" stopColor={REAL} />
