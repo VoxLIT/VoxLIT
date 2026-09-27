@@ -5,6 +5,7 @@ import type { DeepfakeResult, DeepfakeSaliency, RecordingInfo, SilenceProbeResul
 import { readSaliencyVerdict } from "../SaliencyPanel";
 import { readProbeVerdict } from "../SilenceProbeCard";
 import { errorMessage, isUserClip, postDeepfake } from "./api";
+import { readSession, resultKey, writeSession } from "./session";
 import { leanWords, formatScore } from "./palette";
 import { usePalette } from "./theme";
 import { ErrorNote, PrimaryButton, VerdictChip } from "./ui";
@@ -45,15 +46,36 @@ interface AllDetectorsProps {
  */
 export const AllDetectors = ({ models, recording }: AllDetectorsProps) => {
   const { REAL, FAKE } = usePalette();
-  const [cells, setCells] = useState<Record<string, Cell>>({});
+  const recordingId = recording?.recording_id ?? "";
+  // Results already computed for this clip, here or in the single-detector
+  // panels (they share storage keys), come back after a refresh.
+  const restore = (): Record<string, Cell> => {
+    if (!recordingId) return {};
+    const restored: Record<string, Cell> = {};
+    for (const option of models) {
+      const cell: Cell = emptyCell();
+      let found = false;
+      for (const feature of FEATURES) {
+        const stored = readSession<unknown>(resultKey(feature, option.id, recordingId));
+        if (stored) {
+          (cell as unknown as Record<string, unknown>)[feature] = stored;
+          found = true;
+        }
+      }
+      if (found) restored[option.id] = cell;
+    }
+    return restored;
+  };
+  const [cells, setCells] = useState<Record<string, Cell>>(restore);
   const [runningAll, setRunningAll] = useState(false);
   const generation = useRef(0);
-  const recordingId = recording?.recording_id ?? "";
 
   useEffect(() => {
     generation.current += 1;
-    setCells({});
+    setCells(restore());
     setRunningAll(false);
+    // restore reads recordingId and the model list; the clip is what matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordingId]);
 
   const patch = (model: string, update: (cell: Cell) => Cell) =>
@@ -70,6 +92,7 @@ export const AllDetectors = ({ models, recording }: AllDetectorsProps) => {
       try {
         const payload = await postDeepfake<unknown>(feature, { model, recording_id: recordingId });
         if (token !== generation.current) return false;
+        writeSession(resultKey(feature, model, recordingId), payload);
         patch(model, (cell) => ({ ...cell, [feature]: payload, pending: cell.pending.filter((item) => item !== feature) }));
         return true;
       } catch (caught) {

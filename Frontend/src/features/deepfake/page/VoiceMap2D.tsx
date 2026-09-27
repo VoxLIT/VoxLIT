@@ -260,16 +260,16 @@ export const VoiceMap2D = ({ recordings, coordinates, selectedId, hoveredId, onH
                   </text>
                 </>
               )}
-              <motion.circle
-                initial={{ r: radius }}
-                animate={{ r: radius }}
-                transition={{ type: "spring", stiffness: 320, damping: 16 }}
+              {/* r eases through CSS: motion's attribute animation briefly writes r="undefined" */}
+              <circle
+                r={radius}
+                style={{ transition: "r 180ms ease-out" }}
                 fill={colour}
                 fillOpacity={selected || hovered ? 1 : 0.9}
                 stroke={selected || hovered ? INK : "#ffffff"}
                 strokeWidth={selected || hovered ? 1.6 : 1.1}
               />
-              {/* generous invisible hit area — also the keyboard and screen-reader target */}
+              {/* invisible hit area, also the keyboard and screen-reader target */}
               <circle
                 r={HIT}
                 fill="transparent"

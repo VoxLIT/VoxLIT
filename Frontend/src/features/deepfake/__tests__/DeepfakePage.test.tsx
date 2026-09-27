@@ -37,6 +37,8 @@ const task: TaskDefinition = {
 
 // fixtures.ts unstubs globals after every test, so this is re-stubbed per test.
 beforeEach(() => {
+  // The page restores its state from sessionStorage; each test starts clean.
+  window.sessionStorage.clear();
   // motion's whileInView needs it; jsdom has none. Report everything as visible.
   class Observer {
     constructor(private callback: IntersectionObserverCallback) {}
@@ -161,6 +163,34 @@ describe("DeepfakePage", () => {
       model: "xlsr-deepfake",
       recording_id: recordings.recordings[0].recording_id,
     });
+  });
+
+  it("restores the detector, the clip, the guess and the verdict after a refresh", async () => {
+    const fetchMock = routeFetch();
+    const first = renderPage();
+    const library = document.getElementById("library")!;
+    await userEvent.click(await within(library).findByText(recordings.recordings[0].display_filename));
+    const verdict = screen.getByRole("complementary", { name: "Verdict" });
+    await userEvent.click(within(verdict).getByRole("radio", { name: /machine/i }));
+    await userEvent.click(within(verdict).getByRole("button", { name: /reveal the detector/i }));
+    await within(verdict).findByText(/you and the detector disagree/i);
+    first.unmount();
+
+    const runs = () => fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/run")).length;
+    const before = runs();
+    renderPage();
+    const restored = screen.getByRole("complementary", { name: "Verdict" });
+    expect(await within(restored).findByText(/you and the detector disagree/i)).toBeInTheDocument();
+    expect(within(restored).getByText(recordings.recordings[0].display_filename)).toBeInTheDocument();
+    // Shown from the session, not asked for again.
+    expect(runs()).toBe(before);
+  });
+
+  it("reopens on the detector that was chosen before a refresh", () => {
+    routeFetch();
+    window.sessionStorage.setItem("voxlit.deepfake.model", JSON.stringify("ast-fakeaudio"));
+    renderPage();
+    expect(screen.getByRole("combobox", { name: /detector model/i })).toHaveTextContent(/audio spectrogram transformer/i);
   });
 
   it("keeps the numbers one click deeper", async () => {
