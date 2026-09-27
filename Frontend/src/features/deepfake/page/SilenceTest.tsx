@@ -4,6 +4,7 @@ import { Scissors } from "lucide-react";
 import type { ProbeVariant, SilenceProbeResult } from "../types";
 import { readProbeVerdict } from "../SilenceProbeCard";
 import { errorMessage, postDeepfake } from "./api";
+import { readSession, resultKey, writeSession } from "./session";
 import { usePalette } from "./theme";
 import { Disclosure, ErrorNote, FeatureImage, Finding, PrimaryButton } from "./ui";
 import { formatScore } from "./palette";
@@ -21,20 +22,23 @@ const LEGS: { key: keyof SilenceProbeResult["variants"]; label: string; hint: st
  */
 export const SilenceTest = ({ model, recordingId }: { model: string; recordingId: string }) => {
   const { REAL } = usePalette();
-  const [result, setResult] = useState<SilenceProbeResult | null>(null);
+  const key = resultKey("silence-probe", model, recordingId);
+  const [result, setResult] = useState<SilenceProbeResult | null>(() => readSession<SilenceProbeResult>(key));
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setResult(null);
+    setResult(readSession<SilenceProbeResult>(key));
     setError(null);
-  }, [recordingId, model]);
+  }, [key]);
 
   const run = async () => {
     setRunning(true);
     setError(null);
     try {
-      setResult(await postDeepfake<SilenceProbeResult>("silence-probe", { model, recording_id: recordingId }));
+      const payload = await postDeepfake<SilenceProbeResult>("silence-probe", { model, recording_id: recordingId });
+      setResult(payload);
+      writeSession(key, payload);
     } catch (caught) {
       setError(errorMessage(caught, "The silence test failed."));
     } finally {

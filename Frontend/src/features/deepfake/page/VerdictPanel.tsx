@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { Bot, Dices, Ear, Gauge, Sparkles, UserRound } from "lucide-react";
 import type { DeepfakeResult, RecordingInfo } from "../types";
 import { audioUrlFor, errorMessage, formatBytes, formatSeconds, postDeepfake } from "./api";
+import { readSession, resultKey, useSessionState, writeSession } from "./session";
 import { leanWords, formatScore } from "./palette";
 import { usePalette } from "./theme";
 import { ScoreDial } from "./ScoreDial";
@@ -29,23 +30,30 @@ interface VerdictPanelProps {
  */
 export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpriseDisabled }: VerdictPanelProps) => {
   const { REAL, FAKE, ink } = usePalette();
-  const [guess, setGuess] = useState<Guess>(null);
-  const [result, setResult] = useState<DeepfakeResult | null>(null);
+  const recordingId = recording?.recording_id;
+  // The guess and the answer for this clip and detector survive a refresh.
+  const guessKey = resultKey("guess", model, recordingId ?? "");
+  const runKey = resultKey("run", model, recordingId ?? "");
+  const [guess, setGuess] = useState<Guess>(() => (recordingId ? readSession<Guess>(guessKey) : null));
+  const [result, setResult] = useState<DeepfakeResult | null>(() =>
+    recordingId ? readSession<DeepfakeResult>(runKey) : null,
+  );
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tally, setTally] = useState({ asked: 0, agreed: 0 });
+  const [tally, setTally] = useSessionState("tally", { asked: 0, agreed: 0 });
 
   // Each request gets a number; a reply only lands if it is still the latest,
   // so switching clip or model mid-request cannot show the old verdict.
   const latestRequest = useRef(0);
 
-  const recordingId = recording?.recording_id;
   useEffect(() => {
     latestRequest.current += 1;
-    setGuess(null);
-    setResult(null);
+    setGuess(recordingId ? readSession<Guess>(guessKey) : null);
+    setResult(recordingId ? readSession<DeepfakeResult>(runKey) : null);
     setError(null);
     setRunning(false);
+    // guessKey and runKey are derived from recordingId and model.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordingId, model]);
 
   const ask = async () => {
@@ -57,6 +65,7 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
       const payload = await postDeepfake<DeepfakeResult>("run", { model, recording_id: recordingId });
       if (request !== latestRequest.current) return;
       setResult(payload);
+      writeSession(runKey, payload);
       if (guess) {
         const agreed = (guess === "fake") === (payload.decision === "spoof");
         setTally((current) => ({ asked: current.asked + 1, agreed: current.agreed + (agreed ? 1 : 0) }));
@@ -144,7 +153,10 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
                 role="radio"
                 aria-checked={active}
                 disabled={!!result}
-                onClick={() => setGuess(option)}
+                onClick={() => {
+                  setGuess(option);
+                  writeSession(guessKey, option);
+                }}
                 whileTap={{ scale: 0.95 }}
                 animate={{ scale: active ? 1.03 : 1 }}
                 className="flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors disabled:cursor-default"

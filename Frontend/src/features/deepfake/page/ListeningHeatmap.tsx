@@ -4,6 +4,7 @@ import { Flame } from "lucide-react";
 import type { DeepfakeSaliency } from "../types";
 import { readSaliencyVerdict } from "../SaliencyPanel";
 import { audioUrlFor, errorMessage, postDeepfake } from "./api";
+import { readSession, resultKey, writeSession } from "./session";
 import { safePlay, useWaveform } from "./audio";
 import { Disclosure, ErrorNote, FeatureImage, Finding, PrimaryButton } from "./ui";
 import { usePalette } from "./theme";
@@ -18,7 +19,8 @@ const H = 150;
  */
 export const ListeningHeatmap = ({ model, recordingId }: { model: string; recordingId: string }) => {
   const { INK, ink, REAL, FAKE, WARN } = usePalette();
-  const [result, setResult] = useState<DeepfakeSaliency | null>(null);
+  const key = resultKey("saliency", model, recordingId);
+  const [result, setResult] = useState<DeepfakeSaliency | null>(() => readSession<DeepfakeSaliency>(key));
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [position, setPosition] = useState(0);
@@ -30,10 +32,12 @@ export const ListeningHeatmap = ({ model, recordingId }: { model: string; record
 
   useEffect(() => {
     latestRequest.current += 1;
-    setResult(null);
+    setResult(readSession<DeepfakeSaliency>(key));
     setError(null);
     setPosition(0);
     setRunning(false);
+    // key is derived from recordingId and model.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recordingId, model]);
 
   const run = async () => {
@@ -42,7 +46,10 @@ export const ListeningHeatmap = ({ model, recordingId }: { model: string; record
     setError(null);
     try {
       const payload = await postDeepfake<DeepfakeSaliency>("saliency", { model, recording_id: recordingId });
-      if (request === latestRequest.current) setResult(payload);
+      if (request === latestRequest.current) {
+        setResult(payload);
+        writeSession(key, payload);
+      }
     } catch (caught) {
       if (request === latestRequest.current) setError(errorMessage(caught, "The heatmap failed."));
     } finally {

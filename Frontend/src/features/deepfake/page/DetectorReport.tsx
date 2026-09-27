@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import { BarChart3, SlidersHorizontal } from "lucide-react";
 import type { DeepfakeEvaluation, DetPoint } from "../types";
 import { errorMessage, postDeepfake } from "./api";
+import { readSession, resultKey, writeSession } from "./session";
 import { AttackBars, CountUp, DetChart, Histogram } from "./charts";
 import { usePalette } from "./theme";
 import { Disclosure, ErrorNote, FeatureImage, PrimaryButton } from "./ui";
@@ -23,10 +24,15 @@ export const DetectorReport = ({
 }) => {
   const { REAL, MID, FAKE } = usePalette();
   const datasetAvailable = datasetSize > 0;
-  const [result, setResult] = useState<DeepfakeEvaluation | null>(null);
+  const key = resultKey("scores", model);
+  const [result, setResult] = useState<DeepfakeEvaluation | null>(() => readSession<DeepfakeEvaluation>(key));
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [cut, setCut] = useState(0.5);
+  const [cut, setCutState] = useState(() => readSession<number>(`${key}.cut`) ?? 0.5);
+  const setCut = (value: number) => {
+    setCutState(value);
+    writeSession(`${key}.cut`, value);
+  };
 
   // Scoring the whole subset takes minutes; a reply that arrives after the
   // model changed belongs to the old model and is dropped.
@@ -40,6 +46,7 @@ export const DetectorReport = ({
       const payload = await postDeepfake<DeepfakeEvaluation>("scores", { model });
       if (request !== latestRequest.current) return;
       setResult(payload);
+      writeSession(key, payload);
       setCut(payload.operating_point.threshold);
     } catch (caught) {
       if (request === latestRequest.current) setError(errorMessage(caught, "Evaluation failed."));
@@ -51,10 +58,11 @@ export const DetectorReport = ({
   // A report belongs to one model.
   useEffect(() => {
     latestRequest.current += 1;
-    setResult(null);
+    setResult(readSession<DeepfakeEvaluation>(key));
+    setCutState(readSession<number>(`${key}.cut`) ?? 0.5);
     setError(null);
     setRunning(false);
-  }, [model]);
+  }, [key]);
 
   const live = useMemo<DetPoint | null>(() => {
     if (!result || result.det_curve.length === 0) return null;

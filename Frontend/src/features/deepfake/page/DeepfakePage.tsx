@@ -11,6 +11,7 @@ import { AllDetectors } from "./AllDetectors";
 import { errorMessage, listUserClips, postDeepfake } from "./api";
 import { DetectorReport } from "./DetectorReport";
 import { ListeningHeatmap } from "./ListeningHeatmap";
+import { readSession, useSessionState, writeSession } from "./session";
 import { SilenceTest } from "./SilenceTest";
 import { ErrorNote, FeatureImage, PrimaryButton, SectionTitle } from "./ui";
 import { VerdictPanel } from "./VerdictPanel";
@@ -42,17 +43,21 @@ const NAV = [
  */
 export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
   const availableModels = task.models.filter((option) => option.available);
-  const [model, setModel] = useState(task.defaultModel ?? availableModels[0]?.id ?? "");
+  const fallbackModel = task.defaultModel ?? availableModels[0]?.id ?? "";
+  // Everything the visitor chose is restored after a refresh (see session.ts).
+  const [storedModel, setModel] = useSessionState("model", fallbackModel);
+  // A remembered model that is no longer offered falls back to the default.
+  const model = availableModels.some((option) => option.id === storedModel) ? storedModel : fallbackModel;
   const modelLabel = task.models.find((option) => option.id === model)?.label ?? model;
 
   const [recordings, setRecordings] = useState<RecordingInfo[]>([]);
   const [listError, setListError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useSessionState("selected", "");
   const [userClips, setUserClips] = useState<UserClip[]>([]);
 
-  const [mapStarted, setMapStarted] = useState(false);
-  const [method, setMethod] = useState<ReductionMethod>("pca");
-  const [is3D, setIs3D] = useState(false);
+  const [mapStarted, setMapStarted] = useSessionState("map.started", false);
+  const [method, setMethod] = useSessionState<ReductionMethod>("map.method", "pca");
+  const [is3D, setIs3D] = useSessionState("map.3d", false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [projection, setProjection] = useState<DeepfakeEmbeddingProjection | null>(null);
   const [mapLoading, setMapLoading] = useState(false);
@@ -84,8 +89,22 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
   const userClipIds = useMemo(() => userClips.map((clip) => clip.recording_id), [userClips]);
   const userClipKey = userClipIds.join(",");
 
+  const projectionKey = `map.projection.${model}.${method}.${is3D ? 3 : 2}.${userClipKey}`;
+  const lastRefresh = useRef(refreshToken);
+
   useEffect(() => {
     if (!mapStarted || recordings.length === 0) return;
+    // A map already drawn for exactly these settings comes back from the
+    // session; the refresh button is the way to ask the server again.
+    const refreshing = lastRefresh.current !== refreshToken;
+    lastRefresh.current = refreshToken;
+    const cached = refreshing ? null : readSession<DeepfakeEmbeddingProjection>(projectionKey);
+    if (cached) {
+      setProjection(cached);
+      setMapError(null);
+      setMapLoading(false);
+      return;
+    }
     const controller = new AbortController();
     setMapLoading(true);
     setMapError(null);
@@ -101,6 +120,7 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
     )
       .then((payload) => {
         setProjection(payload);
+        writeSession(projectionKey, payload);
         setMapLoading(false);
       })
       .catch((caught) => {
@@ -112,6 +132,24 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
     // userClipIds is covered by userClipKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapStarted, recordings.length, model, method, is3D, refreshToken, userClipKey]);
+
+  // Come back to the same place on the page after a refresh. The browser's
+  // own restoration fires before the async content has height, so the
+  // position is saved on the way out and re-applied once the clips load.
+  useEffect(() => {
+    const save = () => writeSession("scroll", window.scrollY);
+    window.addEventListener("pagehide", save);
+    return () => window.removeEventListener("pagehide", save);
+  }, []);
+  const scrollRestored = useRef(false);
+  useEffect(() => {
+    if (scrollRestored.current || recordings.length === 0) return;
+    scrollRestored.current = true;
+    const target = readSession<number>("scroll");
+    if (!target) return;
+    const timer = window.setTimeout(() => window.scrollTo({ top: target }), 150);
+    return () => window.clearTimeout(timer);
+  }, [recordings.length]);
 
   // Points from another detector would silently belong to the wrong model.
   const liveProjection = projection && projection.model === model ? projection : null;

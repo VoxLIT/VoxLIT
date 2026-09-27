@@ -55,6 +55,8 @@ const clip: UserClip = {
 };
 
 beforeEach(() => {
+  // The page restores its state from sessionStorage; each test starts clean.
+  window.sessionStorage.clear();
   class Observer {
     constructor(private callback: IntersectionObserverCallback) {}
     observe(target: Element) {
