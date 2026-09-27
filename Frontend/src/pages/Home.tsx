@@ -144,26 +144,22 @@ const Home = () => {
           <div aria-hidden className="absolute -top-40 left-1/2 h-80 w-[48rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
 
           <div className="relative mx-auto max-w-6xl px-5">
-            <Reveal className="mx-auto max-w-3xl space-y-6 text-center">
-              <a
-                href={LIT_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded-full border border-border bg-white px-3 py-1 text-xs text-slate-600 shadow-aws-sm transition-colors hover:border-primary/40 hover:text-primary"
-              >
-                <span className="h-1.5 w-1.5 rounded-full bg-[#F06638]" />
-                Extending Google&apos;s Learning Interpretability Tool to speech
-                <ArrowRight className="h-3 w-3" />
-              </a>
-              <h1 className="text-4xl font-semibold leading-[1.1] tracking-tight text-slate-900 sm:text-5xl lg:text-[3.4rem]">
-                See what voice models{" "}
-                <span className="bg-gradient-to-r from-[#0073E6] via-[#2E8CFF] to-[#F06638] bg-clip-text text-transparent">
-                  actually listen to.
-                </span>
+            <Reveal className="mx-auto max-w-3xl space-y-5 text-center">
+              <h1 className="text-3xl font-semibold leading-tight tracking-tight text-slate-900 sm:text-4xl lg:text-[2.75rem]">
+                Learning Interpretability Tool for Voice Models
               </h1>
-              <p className="mx-auto max-w-xl text-base leading-relaxed text-slate-600">
+              <p className="mx-auto max-w-2xl text-base leading-relaxed text-slate-600">
                 An interactive workbench for probing speech models one clip at a time: saliency,
-                attention, embeddings and robustness, across five tasks.
+                attention, embeddings and robustness, across five tasks. Built on the approach of{" "}
+                <a
+                  href={LIT_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-slate-800 underline decoration-slate-300 underline-offset-4 hover:text-primary hover:decoration-primary"
+                >
+                  Google&apos;s LIT
+                </a>
+                .
               </p>
             </Reveal>
 
