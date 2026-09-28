@@ -333,6 +333,7 @@ def verify_speaker(
         "same_speaker": similarity >= spec.threshold,
         "enrollment_compactness": _compactness(enrollment_embeddings),
         "per_reference_scores": per_reference_scores,
+        "enrollment_embeddings": [e.tolist() for e in enrollment_embeddings],
         "enrollment_centroid": centroid.tolist(),
         "probe_embedding": probe_embedding.tolist(),
         "calibration": {

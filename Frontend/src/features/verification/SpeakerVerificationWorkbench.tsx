@@ -15,6 +15,7 @@ import type { BatchAnalysisResponse } from "./batchTypes";
 import type { SaliencyMapResponse } from "./saliencyTypes";
 import { PerturbationTools, type VerificationPerturbationContext } from "@/components/analysis/PerturbationTools";
 import { clusterMapStore } from "./clusterMapStore";
+import { useEmbedding } from "@/contexts/EmbeddingContext";
 import type { LocalFilePreview, WorkbenchCenterProps } from "@/tasks/types";
 
 const DEFAULT_SALIENCY_SEGMENT_COUNT = 8;
@@ -60,6 +61,7 @@ interface VerificationResult {
   same_speaker: boolean;
   enrollment_compactness: number;
   per_reference_scores: ReferenceScore[];
+  enrollment_embeddings?: number[][];
   enrollment_centroid: number[];
   probe_embedding: number[];
   calibration: {
@@ -78,15 +80,21 @@ export const SpeakerVerificationWorkbench = ({
   originalDataset,
   uploadedRawFiles,
   selectedFile,
+  selectedEmbeddingFile,
   selectedBatchIds,
+  onSelectedBatchIdsChange,
   pairSelection,
+  onClearPairSelection,
   datasetRecordings,
   onReprojectHandlerChange,
   onLabelResolverChange,
+  onLocalPreviewResolverChange,
   onVerificationAssetCreated,
   localPreview,
   onLocalFileSelect,
 }: SpeakerVerificationWorkbenchProps) => {
+  const { setEmbeddingDataDirect } = useEmbedding();
+  const [activeTab, setActiveTab] = useState("pair-verification");
   const [enrollmentRefs, setEnrollmentRefs] = useState<LocalFilePreview[]>([]);
   const [probeRef, setProbeRef] = useState<LocalFilePreview | null>(null);
   const [result, setResult] = useState<VerificationResult | null>(null);
@@ -351,6 +359,76 @@ export const SpeakerVerificationWorkbench = ({
     setSaliencyGeneratedFor(null);
   };
 
+  const projectPairEmbeddings = useCallback(
+    async (
+      verifyResult: VerificationResult,
+      currentEnrollments: LocalFilePreview[],
+      currentProbe: LocalFilePreview,
+      method: string = "pca",
+      nComponents: 2 | 3 = 2
+    ) => {
+      if (!verifyResult.enrollment_embeddings || verifyResult.enrollment_embeddings.length === 0) {
+        return;
+      }
+      const allEmbeddings = [...verifyResult.enrollment_embeddings, verifyResult.probe_embedding];
+      const allLabels = [
+        ...currentEnrollments.map((r, i) => `Reference ${i + 1}: ${r.file.name}`),
+        `Probe: ${currentProbe.file.name}`,
+      ];
+
+      try {
+        const response = await fetch(`${API_BASE}/tasks/verification/batch/project`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: verifyResult.model,
+            embeddings: allEmbeddings,
+            labels: allLabels,
+            reduction_method: method,
+            n_components: nComponents,
+          }),
+        });
+
+        if (!response.ok) return;
+        const projPayload = await response.json();
+
+        setEmbeddingDataDirect({
+          model: verifyResult.model,
+          dataset: "custom:pair-verification",
+          reduction_method: method,
+          n_components: nComponents,
+          embeddings: [],
+          total_files: allLabels.length,
+          original_dimension: verifyResult.embedding_dimension,
+          reduction_method_used: projPayload.reduction_method_used,
+          effective_components: projPayload.effective_components,
+          reduced_embeddings: [
+            ...currentEnrollments.map((ref, i) => ({
+              filename: ref.file.name,
+              displayFilename: `${ref.label} (${ref.file.name})`,
+              coordinates: projPayload.coordinates[i],
+              color: "#2563eb",
+              hoverExtra: `Enrolment Reference ${i + 1} • Similarity to probe: ${formatScore(verifyResult.per_reference_scores[i]?.similarity ?? 0)}`,
+              clusterId: "Reference Speaker",
+            })),
+            {
+              filename: currentProbe.file.name,
+              displayFilename: `Probe (${currentProbe.file.name})`,
+              coordinates: projPayload.coordinates[currentEnrollments.length],
+              color: verifyResult.same_speaker ? "#16a34a" : "#dc2626",
+              hoverExtra: `Probe Clip • Similarity to centroid: ${formatScore(verifyResult.similarity)} (${verifyResult.same_speaker ? "Same speaker" : "Different speakers"})`,
+              clusterId: verifyResult.same_speaker ? "Reference Speaker" : "Different Speaker",
+            },
+          ],
+        });
+      } catch (err) {
+        console.error("Failed to project pair verification embeddings:", err);
+      }
+    },
+    [setEmbeddingDataDirect]
+  );
+
   const runVerification = async () => {
     if (!canRunDevice || !probeRef || !currentDeviceKey) return;
 
@@ -384,7 +462,8 @@ export const SpeakerVerificationWorkbench = ({
         throw new Error(payload.detail || `Verification failed (${response.status})`);
       }
       if (!keysEqual(requestKey, currentDeviceKeyRef.current)) return;
-      setResult(payload as VerificationResult);
+      const verifyResult = payload as VerificationResult;
+      setResult(verifyResult);
       setResultGeneratedFor(requestKey);
       if (saliencyGeneratedFor) {
         setSaliencyResult(null);
@@ -392,6 +471,9 @@ export const SpeakerVerificationWorkbench = ({
         setSaliencyGeneratedFor(null);
         saliencyKeyRef.current = null;
       }
+
+      // Add the (3 to 5 enrollment + 1 probe) clips to the graph
+      await projectPairEmbeddings(verifyResult, enrollmentRefs, probeRef, "pca", 2);
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
       setError(caught instanceof Error ? caught.message : "Speaker verification failed.");
@@ -402,6 +484,52 @@ export const SpeakerVerificationWorkbench = ({
       }
     }
   };
+
+  const handlePairReproject = useCallback(
+    (method: string, n: number) => {
+      if (result && probeRef && enrollmentRefs.length >= 3) {
+        projectPairEmbeddings(result, enrollmentRefs, probeRef, method, n === 3 ? 3 : 2);
+      }
+    },
+    [result, probeRef, enrollmentRefs, projectPairEmbeddings]
+  );
+
+  useEffect(() => {
+    if (activeTab === "pair-verification" && result && probeRef && enrollmentRefs.length >= 3) {
+      onReprojectHandlerChange(handlePairReproject);
+    }
+  }, [activeTab, result, probeRef, enrollmentRefs.length, handlePairReproject, onReprojectHandlerChange]);
+
+  useEffect(() => {
+    if (activeTab === "pair-verification") {
+      const resolver = (label: string): LocalFilePreview | null => {
+        const foundRef = enrollmentRefs.find(
+          (r) => r.file.name === label || r.localId === label || r.label === label
+        );
+        if (foundRef) return foundRef;
+        if (probeRef && (probeRef.file.name === label || probeRef.localId === label || probeRef.label === label)) {
+          return probeRef;
+        }
+        return null;
+      };
+      onLocalPreviewResolverChange?.(resolver);
+    } else {
+      onLocalPreviewResolverChange?.(null);
+    }
+    return () => {
+      onLocalPreviewResolverChange?.(null);
+    };
+  }, [activeTab, enrollmentRefs, probeRef, onLocalPreviewResolverChange]);
+
+  useEffect(() => {
+    if (activeTab !== "pair-verification" || !selectedEmbeddingFile) return;
+    const match =
+      enrollmentRefs.find((r) => r.file.name === selectedEmbeddingFile || r.localId === selectedEmbeddingFile) ||
+      (probeRef && (probeRef.file.name === selectedEmbeddingFile || probeRef.localId === selectedEmbeddingFile) ? probeRef : null);
+    if (match && localPreview?.localId !== match.localId) {
+      onLocalFileSelect(match);
+    }
+  }, [activeTab, selectedEmbeddingFile, enrollmentRefs, probeRef, localPreview, onLocalFileSelect]);
 
   const runUploadSaliency = async () => {
     if (!isResultCurrent || !probeRef || !currentDeviceKey) return;
@@ -450,7 +578,7 @@ export const SpeakerVerificationWorkbench = ({
   };
 
   return (
-    <Tabs defaultValue="pair-verification" className="h-full flex flex-col">
+    <Tabs defaultValue="pair-verification" value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
       <div className="flex-shrink-0 bg-panel-header border-b border-border px-3 py-2">
         <TabsList className="h-7 grid w-full grid-cols-4 bg-muted">
           <TabsTrigger value="pair-verification" className="text-xs">Pair Verification</TabsTrigger>
@@ -748,9 +876,6 @@ export const SpeakerVerificationWorkbench = ({
                         <Badge variant="secondary">{formatScore(item.similarity)}</Badge>
                       </div>
                     ))}
-                    <div className="border-t pt-2 text-xs text-muted-foreground">
-                      {result.embedding_dimension}-dimensional embeddings · EER-calibrated on the VoxCeleb1 Indian verification subset · threshold locked before test evaluation
-                    </div>
                   </CardContent>
                 </Card>
 

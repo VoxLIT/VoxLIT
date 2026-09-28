@@ -258,6 +258,13 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
                 {item.label}
               </a>
             ))}
+            <Link
+              to="/help"
+              className="rounded-sm px-2 py-1 text-xs text-cyan-300 font-medium transition hover:bg-white/10 hover:text-white flex items-center gap-1"
+            >
+              <HelpCircle className="h-3 w-3" />
+              Help & Formulas
+            </Link>
           </nav>
         </div>
       </header>

@@ -219,4 +219,7 @@ export interface WorkbenchCenterProps {
   /** Verification-only: sets/clears the active local device-file preview.
    *  Never affects selectedFile/selectedBatchIds/graph state. */
   onLocalFileSelect: (preview: LocalFilePreview | null) => void;
+  /** Verification-only: registers a resolver to convert an embedding point label
+   *  to a local device-file preview (Pair Verification external audio files). */
+  onLocalPreviewResolverChange?: (resolver: ((label: string) => LocalFilePreview | null) | null) => void;
 }

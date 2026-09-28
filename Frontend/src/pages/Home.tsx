@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import {
   AudioWaveform,
   ArrowRight,
+  BookOpen,
   Brain,
   ChevronDown,
   Database,
@@ -163,12 +164,20 @@ const Home = () => {
             Learning Interpretability Tool for Voice Models
           </span>
         </div>
-        <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
-          <a href="https://github.com/chanuGX/VoxLIT" target="_blank" rel="noreferrer">
-            <Github className="h-3.5 w-3.5 mr-1.5" />
-            GitHub
-          </a>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline" size="sm" className="h-7 text-xs border-border bg-white text-foreground">
+            <Link to="/help">
+              <BookOpen className="h-3.5 w-3.5 mr-1.5 text-primary" />
+              Help & Formulas
+            </Link>
+          </Button>
+          <Button asChild variant="ghost" size="sm" className="h-7 text-xs">
+            <a href="https://github.com/chanuGX/VoxLIT" target="_blank" rel="noreferrer">
+              <Github className="h-3.5 w-3.5 mr-1.5" />
+              GitHub
+            </a>
+          </Button>
+        </div>
       </header>
 
       <main className="flex-1">

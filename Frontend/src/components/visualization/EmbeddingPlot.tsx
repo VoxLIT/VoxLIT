@@ -74,7 +74,11 @@ const matchesSelectedFile = (label: string, file?: string | null): boolean => {
   const lNorm = normalizeLabel(label);
   const fNorm = normalizeLabel(file);
   if (lNorm === fNorm) return true;
-  if (lNorm.includes(fNorm) || fNorm.includes(lNorm)) return true;
+  const match = label.match(/\(([^)]+)\)/);
+  if (match) {
+    const innerNorm = normalizeLabel(match[1]);
+    if (innerNorm === fNorm) return true;
+  }
   return false;
 };
 
@@ -684,11 +688,14 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
       z: z && z.length > 0 ? [Math.min(...z) * 1.1, Math.max(...z) * 1.1] as [number, number] : [0, 0] as [number, number]
     } : { x: [0, 0] as [number, number], y: [0, 0] as [number, number], z: [0, 0] as [number, number] };
 
+    const hasActivePair = (externalSelectedLabels?.length ?? 0) > 0;
     const isPointSelected = (label: string, index?: number): boolean => {
       if (isExternal) {
+        if (hasActivePair) {
+          return externalSelectedLabels!.includes(label);
+        }
         const ext = index !== undefined && externalData ? externalData[index] : undefined;
         return (
-          (externalSelectedLabels?.includes(label) ?? false) ||
           matchesSelectedFile(label, selectedFile) ||
           (ext?.displayLabel ? matchesSelectedFile(ext.displayLabel, selectedFile) : false)
         );
@@ -911,9 +918,12 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
   // trace's point order for isExternal is exactly `externalData`'s order.
   const focusStyles = useMemo(() => {
     if (!isExternal || !externalData) return null;
-    const hasSelection = (externalSelectedLabels?.length ?? 0) > 0 || !!selectedFile;
+    const hasActivePair = (externalSelectedLabels?.length ?? 0) > 0;
+    const hasSelection = hasActivePair || !!selectedFile;
     const colors = externalData.map((point) => {
-      const isSelected = (externalSelectedLabels?.includes(point.label) ?? false) || matchesSelectedFile(point.label, selectedFile);
+      const isSelected = hasActivePair
+        ? (externalSelectedLabels?.includes(point.label) ?? false)
+        : matchesSelectedFile(point.label, selectedFile);
       if (isSelected) return point.color;
       if (focusedClusterId && point.clusterId !== focusedClusterId) {
         return mixWithWhite(point.color, 0.7);
@@ -921,7 +931,9 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
       return point.color;
     });
     const opacities = externalData.map((point) => {
-      const isSelected = (externalSelectedLabels?.includes(point.label) ?? false) || matchesSelectedFile(point.label, selectedFile);
+      const isSelected = hasActivePair
+        ? (externalSelectedLabels?.includes(point.label) ?? false)
+        : matchesSelectedFile(point.label, selectedFile);
       if (isSelected) return 1.0;
       if (focusedClusterId && point.clusterId !== focusedClusterId) return 0.55;
       return hasSelection ? 0.7 : 0.85;
