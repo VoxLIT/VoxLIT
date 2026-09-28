@@ -15,6 +15,7 @@ import { RefreshCw, Eye, Box, Square, BarChart3, HelpCircle, Info } from "lucide
 import { getFeatureExplanation } from "@/lib/audioFeatures";
 import { API_BASE } from "@/lib/api";
 import { BatchAnalysisKind } from "@/tasks/types";
+import { getNextVerificationPairSelection } from "@/features/verification/pairSelection";
 
 interface EmbeddingPanelProps {
   model?: string;
@@ -245,12 +246,7 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
       onFileSelect(filename);
     }
     if (verificationMode) {
-      const prev = pairSelection ?? [];
-      const next = prev.includes(filename)
-        ? prev.filter((l) => l !== filename)
-        : prev.length < 2
-          ? [...prev, filename]
-          : [prev[1], filename];
+      const next = getNextVerificationPairSelection(pairSelection, filename);
       onPairSelectionChange?.(next);
     }
   };
