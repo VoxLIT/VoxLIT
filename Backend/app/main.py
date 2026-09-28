@@ -8,6 +8,7 @@ from .core.session import SessionMiddleware
 
 from .api.routes import session as session_routes, results as results_routes, inferences as inferences_routes, upload as upload_routes, health as health_routes
 from .api.routes import datasets as datasets_routes, saliency as saliency_routes, perturbations as perturbations_routes, dataset_management as dataset_management_routes, debug as debug_routes
+from .api.routes import quick_transcribe as quick_transcribe_routes
 from .tasks import ACTIVE_TASK_MODULES, router as tasks_router
 from .tasks.verification import session_assets
 
@@ -50,6 +51,7 @@ app.include_router(session_routes.router, tags=["Session"])
 app.include_router(results_routes.router, tags=["Results"])
 app.include_router(inferences_routes.router, tags=["Inferences"])
 app.include_router(upload_routes.router, tags=["Upload"])
+app.include_router(quick_transcribe_routes.router, tags=["Quick Transcribe"])
 app.include_router(dataset_management_routes.router, prefix="/upload", tags=["Dataset Management"])
 
 # Task registry + per-task routers (app/tasks/). Must be registered BEFORE the
