@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Home from "./pages/Home";
 import TaskPage from "./pages/TaskPage";
+import HelpPortal from "./pages/HelpPortal";
 import NotFound from "./pages/NotFound";
 import { TASKS } from "./tasks/registry";
 
@@ -18,6 +19,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/help" element={<HelpPortal />} />
           {TASKS.map((task) => (
             <Route key={task.id} path={task.route} element={<TaskPage task={task} />} />
           ))}

@@ -199,6 +199,10 @@ export const TaskWorkbench = ({ task }: TaskWorkbenchProps) => {
   const registerLabelResolver = useCallback((resolver: ((label: string) => string | undefined) | null) => {
     setLabelResolverFn(() => resolver);
   }, []);
+  const [localPreviewResolverFn, setLocalPreviewResolverFn] = useState<((label: string) => LocalFilePreview | null) | null>(null);
+  const registerLocalPreviewResolver = useCallback((resolver: ((label: string) => LocalFilePreview | null) | null) => {
+    setLocalPreviewResolverFn(() => resolver);
+  }, []);
 
   // Whenever any batch-defining input changes, the current pair selection is
   // no longer meaningful — clear it. (batchResult/projection clearing is
@@ -719,6 +723,20 @@ export const TaskWorkbench = ({ task }: TaskWorkbenchProps) => {
     }
   };
 
+  const handleLocalFileSelect = useCallback((preview: LocalFilePreview | null) => {
+    setLocalPreview(preview);
+    if (preview) {
+      setSelectedEmbeddingFile(preview.file.name);
+      setPairSelectionLabels([preview.file.name]);
+      setSelectedFile({
+        file_id: preview.localId,
+        filename: preview.file.name,
+        file_path: preview.file.name,
+        message: "Selected from local preview",
+      });
+    }
+  }, []);
+
   const handleFileSelection = (file: UploadedFile) => {
     setLocalPreview(null);
     setSelectedFile(file);
@@ -727,6 +745,20 @@ export const TaskWorkbench = ({ task }: TaskWorkbenchProps) => {
   };
 
   const handleEmbeddingSelection = (filename: string) => {
+    // Check if the selected point is an external Pair Verification preview file
+    const localMatch = localPreviewResolverFn ? localPreviewResolverFn(filename) : null;
+    if (localMatch) {
+      setLocalPreview(localMatch);
+      setSelectedEmbeddingFile(localMatch.file.name);
+      setSelectedFile({
+        file_id: localMatch.localId,
+        filename: localMatch.file.name,
+        file_path: localMatch.file.name,
+        message: "Selected from embeddings",
+      });
+      return;
+    }
+
     setLocalPreview(null);
     // Speaker Verification's graph reports backend labels (upload-000,
     // rec_<hash>, ...), never real filenames — translate through the
@@ -927,9 +959,10 @@ export const TaskWorkbench = ({ task }: TaskWorkbenchProps) => {
                       onSelectedBatchIdsChange={setSelectedBatchIds}
                       onReprojectHandlerChange={registerReprojectHandler}
                       onLabelResolverChange={registerLabelResolver}
+                      onLocalPreviewResolverChange={registerLocalPreviewResolver}
                       onVerificationAssetCreated={handleVerificationAssetCreated}
                       localPreview={localPreview}
-                      onLocalFileSelect={setLocalPreview}
+                      onLocalFileSelect={handleLocalFileSelect}
                     />
                   ) : task.status === "active" ? (
                     <ExplainabilityPanel

@@ -367,6 +367,20 @@ export const Toolbar = ({ task, selectedFile, uploadedFiles, onFileSelect, model
 
           <Tooltip>
             <TooltipTrigger asChild>
+              <Button asChild variant="outline" size="sm" className="h-7 text-xs border-border bg-white hover:bg-muted text-foreground">
+                <Link to="/help">
+                  <HelpCircle className="h-3.5 w-3.5 mr-1 text-primary" />
+                  Help & Formulas
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Explore features, guides, and mathematical formulas</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
               <Button variant="default" size="sm" className="h-7 text-xs shadow-aws-sm" onClick={handleUploadClick}>
                 <Upload className="h-3.5 w-3.5 mr-1.5" />
                 Upload

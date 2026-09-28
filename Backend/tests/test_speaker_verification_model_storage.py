@@ -8,6 +8,7 @@ so we can assert on the exact arguments the adapters pass to them.
 
 import dataclasses
 import importlib
+import sys
 from unittest.mock import MagicMock
 
 import pytest
@@ -165,3 +166,16 @@ def test_reloading_service_never_calls_real_model_loaders(monkeypatch):
     finally:
         vars(service).clear()
         vars(service).update(original_state)
+
+
+def test_shield_speechbrain_lazy_modules_stashes_and_restores(monkeypatch):
+    """SpeechBrain's LazyModules must be stashed from sys.modules during checkpoint loading."""
+    from speechbrain.utils.importutils import DeprecatedModuleRedirect
+
+    fake_lazy = DeprecatedModuleRedirect("fake.source", "fake.target")
+    monkeypatch.setitem(sys.modules, "speechbrain.fake_lazy", fake_lazy)
+
+    with service._shield_speechbrain_lazy_modules():
+        assert "speechbrain.fake_lazy" not in sys.modules
+
+    assert sys.modules.get("speechbrain.fake_lazy") is fake_lazy

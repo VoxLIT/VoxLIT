@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import type { BatchAnalysisResponse } from "./batchTypes";
+import { formatClusterLabel } from "./formatSpeakerLabel";
 
 interface PairComparisonCardProps {
   selectedLabels: string[];
@@ -129,11 +130,11 @@ export const PairComparisonCard = ({ selectedLabels, batchResult, labelToIndex, 
             </div>
             <div className="flex items-center justify-between">
               <span className="truncate text-muted-foreground">{batchResult.labels[indexA]}</span>
-              <Badge variant="secondary">{pairDetails.clusterA}</Badge>
+              <Badge variant="secondary">{formatClusterLabel(pairDetails.clusterA)}</Badge>
             </div>
             <div className="flex items-center justify-between">
               <span className="truncate text-muted-foreground">{batchResult.labels[indexB]}</span>
-              <Badge variant="secondary">{pairDetails.clusterB}</Badge>
+              <Badge variant="secondary">{formatClusterLabel(pairDetails.clusterB)}</Badge>
             </div>
             <div className="flex items-center gap-2">
               {pairDetails.sameCluster ? (

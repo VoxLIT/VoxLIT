@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import type { PredictionResultsProps } from "@/tasks/types";
 import { clusterAssignmentStore } from "./clusterAssignmentStore";
+import { formatClusterLabel } from "./formatSpeakerLabel";
 
 const formatScore = (value: number) => value.toFixed(4);
 
@@ -26,7 +27,7 @@ export const ClusterAssignmentResults = ({ selectedFile }: PredictionResultsProp
   const cardHeader = (
     <CardHeader>
       <CardTitle className="flex items-center gap-2 text-sm">
-        <Target className="h-4 w-4" /> Cluster assignment results
+        <Target className="h-4 w-4" /> Speaker assignment results
       </CardTitle>
     </CardHeader>
   );
@@ -36,7 +37,7 @@ export const ClusterAssignmentResults = ({ selectedFile }: PredictionResultsProp
       <Card>
         {cardHeader}
         <CardContent>
-          <p className="text-xs text-muted-foreground">Select a recording to see its cluster assignment.</p>
+          <p className="text-xs text-muted-foreground">Select a recording to see its speaker assignment.</p>
         </CardContent>
       </Card>
     );
@@ -50,7 +51,7 @@ export const ClusterAssignmentResults = ({ selectedFile }: PredictionResultsProp
           <p className="text-xs text-muted-foreground">
             {snapshot
               ? "This recording is not part of the current batch results."
-              : "Run a batch analysis to see cluster assignment results."}
+              : "Run a batch analysis to see speaker assignment results."}
           </p>
         </CardContent>
       </Card>
@@ -65,10 +66,10 @@ export const ClusterAssignmentResults = ({ selectedFile }: PredictionResultsProp
       <Card>
         {cardHeader}
         <CardContent className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
-          <span className="text-muted-foreground">Predicted cluster</span>
-          <Badge variant="secondary" className="w-fit">{stats.cluster_id}</Badge>
+          <span className="text-muted-foreground">Predicted speaker</span>
+          <Badge variant="secondary" className="w-fit">{formatClusterLabel(stats.cluster_id)}</Badge>
 
-          <span className="text-muted-foreground">Cluster size</span>
+          <span className="text-muted-foreground">Speaker group size</span>
           <span>{clusterSize} recording{clusterSize === 1 ? "" : "s"}</span>
 
           <span className="flex items-center gap-1 text-muted-foreground">

@@ -350,7 +350,7 @@ export const DatapointEditorPanel = ({
                   <div className="text-xs text-muted-foreground">
                     <span className="font-medium">Role: </span>
                     <span className="text-foreground">
-                      {localPreview.role === "enrollment" ? "Enrollment reference" : "Probe"}
+                      {localPreview.label || (localPreview.role === "enrollment" ? "Enrollment reference" : "Probe")}
                     </span>
                   </div>
                 )}
@@ -489,7 +489,7 @@ export const DatapointEditorPanel = ({
                   <div className="text-xs-tight">
                     <span className="text-gray-500">Role:</span>
                     <span className="ml-2 text-gray-700">
-                      {localPreview.role === "enrollment" ? "Enrollment reference" : "Probe"}
+                      {localPreview.label || (localPreview.role === "enrollment" ? "Enrollment reference" : "Probe")}
                     </span>
                   </div>
                 )}

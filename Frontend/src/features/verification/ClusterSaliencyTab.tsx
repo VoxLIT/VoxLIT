@@ -7,6 +7,7 @@ import { verificationAudioUrl } from "./audioUrl";
 import type { BatchAnalysisResponse } from "./batchTypes";
 import type { SaliencyMapResponse } from "./saliencyTypes";
 import type { UploadedFile } from "@/tasks/types";
+import { formatClusterLabel } from "./formatSpeakerLabel";
 
 const DEFAULT_SALIENCY_SEGMENT_COUNT = 8;
 const isBackendResolvableId = (id: string) =>
@@ -156,7 +157,7 @@ export const ClusterSaliencyTab = ({
                     }}
                     className="text-[10px]"
                   >
-                    {targetClusterId}
+                    {formatClusterLabel(targetClusterId)}
                   </Badge>
                 )}
               </span>
@@ -194,7 +195,7 @@ export const ClusterSaliencyTab = ({
           segmentCount={saliencySegmentCount}
           onSegmentCountChange={setSaliencySegmentCount}
           clusterBadge={
-            targetClusterId ? { label: targetClusterId, color: clusterColorMap[targetClusterId] ?? "#3b82f6" } : null
+            targetClusterId ? { label: formatClusterLabel(targetClusterId), color: clusterColorMap[targetClusterId] ?? "#3b82f6" } : null
           }
         />
       )}

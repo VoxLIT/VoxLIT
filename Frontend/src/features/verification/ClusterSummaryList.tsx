@@ -3,6 +3,7 @@ import { HelpCircle, Layers } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import type { ClusterSummary } from "./batchTypes";
+import { formatClusterLabel } from "./formatSpeakerLabel";
 
 interface ClusterSummaryListProps {
   clusterSummaries: ClusterSummary[];
@@ -63,23 +64,24 @@ export const ClusterSummaryList = ({
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-sm">
-            <Layers className="h-4 w-4" /> Predicted clusters
+            <Layers className="h-4 w-4" /> Predicted speakers
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {sortedClusters.length === 0 && (
-            <p className="text-xs text-muted-foreground">No clusters to display.</p>
+            <p className="text-xs text-muted-foreground">No speakers to display.</p>
           )}
           {sortedClusters.map((cluster) => {
             const isFocused = focusedClusterId === cluster.cluster_id;
             const clusterColor = clusterColorMap[cluster.cluster_id];
+            const speakerLabel = formatClusterLabel(cluster.cluster_id);
             return (
               <button
                 key={cluster.cluster_id}
                 type="button"
                 onClick={() => handleClusterClick(cluster.cluster_id)}
                 aria-pressed={isFocused}
-                aria-label={`Focus ${cluster.cluster_id}, ${cluster.member_count} recordings`}
+                aria-label={`Focus ${speakerLabel}, ${cluster.member_count} recordings`}
                 className="w-full space-y-1.5 rounded-md border p-2 text-left text-xs transition-colors"
                 style={
                   isFocused
@@ -92,7 +94,7 @@ export const ClusterSummaryList = ({
                     className="h-2.5 w-2.5 shrink-0 rounded-full"
                     style={{ backgroundColor: clusterColor }}
                   />
-                  <span className="font-medium">{cluster.cluster_id}</span>
+                  <span className="font-medium">{speakerLabel}</span>
                   <span className="text-muted-foreground">
                     {cluster.member_count} recording{cluster.member_count === 1 ? "" : "s"}
                   </span>
@@ -150,7 +152,37 @@ export const ClusterSummaryList = ({
                     </Tooltip>
                   </span>
                 </div>
-                <p className="truncate text-muted-foreground">{cluster.member_labels.map(resolve).join(", ")}</p>
+                <div
+                  className="flex items-center gap-1.5 pt-1 text-muted-foreground text-xs"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <span className="font-medium text-foreground shrink-0">Clips ({cluster.member_count}):</span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="truncate flex-1 font-mono cursor-pointer hover:text-foreground transition-colors inline-flex items-center gap-1">
+                        <span className="truncate">{cluster.member_labels.map(resolve).join(", ")}</span>
+                        <HelpCircle className="h-3 w-3 shrink-0 text-muted-foreground hover:text-primary cursor-help" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="top"
+                      align="start"
+                      className="max-w-xs max-h-60 overflow-y-auto p-2.5 text-xs bg-popover text-popover-foreground border shadow-md space-y-1.5"
+                    >
+                      <div className="font-semibold text-xs border-b pb-1 flex items-center justify-between gap-4">
+                        <span>{speakerLabel} Clips</span>
+                        <span className="text-muted-foreground font-normal">{cluster.member_count} total</span>
+                      </div>
+                      <div className="space-y-0.5 font-mono text-[11px] max-h-48 overflow-y-auto pr-1">
+                        {cluster.member_labels.map(resolve).map((label, idx) => (
+                          <div key={idx} className="truncate py-0.5 border-b border-muted/30 last:border-0 hover:text-primary">
+                            {idx + 1}. {label}
+                          </div>
+                        ))}
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
               </button>
             );
           })}
