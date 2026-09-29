@@ -49,13 +49,20 @@ export interface ProjectionPoint {
   id: string;
   x: number;
   y: number;
+  /** Only present on a `dims=3` projection. */
+  z?: number;
   speaker: string;
   confidence: number | null;
 }
 
+export type ProjectionDims = 2 | 3;
+
 export interface ProjectionResult {
   model: string;
   recording_id: string;
+  dims?: ProjectionDims;
+  /** Each PCA axis's share of the embeddings' variance, in axis order. */
+  explained_variance?: number[];
   points: ProjectionPoint[];
 }
 
@@ -67,6 +74,13 @@ export interface PerturbationSpec {
   type: PerturbationType;
   /** Normalized by the backend — noise carries the `seed` it actually used. */
   params: Record<string, number>;
+}
+
+/** POST /perturbation/preview: the changed clip only, not diarized yet. Its
+ *  id is deterministic, so a later full run reuses the same file. */
+export interface PerturbationPreview {
+  perturbed_id: string;
+  perturbation: PerturbationSpec;
 }
 
 /** One diarization run, as the comparison view needs it (no embeddings). */

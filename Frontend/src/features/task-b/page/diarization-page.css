@@ -1,0 +1,319 @@
+/* Speaker Diarization page — its own look, scoped to .dz-page so no other
+   task (or the shared shadcn theme) is affected. Colour means speaker
+   identity; the one accent is indigo, which no speaker uses. */
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap");
+
+.dz-page {
+  /* shadcn tokens, re-pointed for this page only (HSL triplets), so the
+     shadcn components inside the page match it */
+  --background: 228 30% 7%;
+  --foreground: 225 25% 92%;
+  --card: 228 26% 11%;
+  --card-foreground: 225 25% 92%;
+  --popover: 228 26% 12%;
+  --popover-foreground: 225 25% 92%;
+  --primary: 239 84% 67%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 228 20% 17%;
+  --secondary-foreground: 225 25% 92%;
+  --muted: 228 20% 15%;
+  --muted-foreground: 225 14% 66%;
+  --accent: 228 24% 20%;
+  --accent-foreground: 225 25% 92%;
+  --destructive: 358 75% 59%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 228 18% 20%;
+  --input: 228 18% 20%;
+  --ring: 239 84% 67%;
+
+  --dz-accent: #6366f1;
+  --dz-accent-hover: #7477f4;
+  --dz-accent-soft: #a5b4fc;
+  --dz-warn: #d4a72c;
+
+  /* surfaces, so components say what a colour is for rather than what it is */
+  --dz-canvas: #0b0d16;
+  --dz-well: #090b12;
+  --dz-panel: rgba(17, 20, 33, 0.98);
+  --dz-header: rgba(11, 13, 22, 0.85);
+  --dz-ink: #e6e9f2;
+
+  background: var(--dz-canvas);
+  color: hsl(var(--foreground));
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: dark;
+  transition: background-color 0.4s ease, color 0.4s ease;
+}
+
+.dz-page .font-display {
+  font-family: "Space Grotesk", Inter, sans-serif;
+  letter-spacing: -0.02em;
+}
+.dz-page .font-mono {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* A faint top-lit wash behind the page. */
+.dz-glow {
+  position: fixed;
+  inset: -20vmax;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(60vmax 35vmax at 50% 0%, rgba(99, 102, 241, 0.09), transparent 70%);
+}
+
+/* Card surface. */
+.dz-card {
+  background: #121522;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 32px -20px rgba(0, 0, 0, 0.6);
+}
+
+/* Uncertain segments: hatching in the speaker's own colour (set `color`),
+   reused by the timeline, the map and the popups. Never a new colour. */
+.dz-hatch {
+  background-image: repeating-linear-gradient(45deg, currentColor 0 3px, transparent 3px 6px);
+}
+
+/* ── Semantic surfaces and accent ─────────────────────────────────────────── */
+.dz-page .dz-well { background: var(--dz-well); }
+.dz-page .dz-panel { background: var(--dz-panel); }
+.dz-page .dz-header { background: var(--dz-header); }
+.dz-page .dz-canvas { background: var(--dz-canvas); }
+.dz-page .dz-accent-text { color: var(--dz-accent-soft); }
+.dz-page .dz-accent-bar { background: var(--dz-accent); }
+.dz-page .dz-eyebrow { color: color-mix(in srgb, var(--dz-accent-soft) 85%, transparent); }
+.dz-page .dz-primary-btn {
+  background: var(--dz-accent);
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 8px 24px -12px var(--dz-accent);
+}
+.dz-page .dz-primary-btn:not(:disabled):hover { background: var(--dz-accent-hover); }
+/* Active segment of a segmented control. */
+.dz-page .dz-pill { background: #ffffff; }
+.dz-page .dz-image-fade {
+  background: linear-gradient(to top, var(--dz-canvas), color-mix(in srgb, var(--dz-canvas) 30%, transparent), transparent);
+}
+.dz-page .dz-popup-border {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 16px 40px -12px rgba(0, 0, 0, 0.6);
+}
+/* Selected meeting card. */
+.dz-page .dz-selected {
+  box-shadow: 0 0 0 2px var(--dz-accent), 0 12px 32px -14px var(--dz-accent);
+}
+/* Dashed upload card; brightens while a file is dragged over it. */
+.dz-page .dz-dropzone {
+  border: 1.5px dashed rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.02);
+}
+.dz-page .dz-dropzone[data-dragging="true"] {
+  border-color: var(--dz-accent);
+  background: color-mix(in srgb, var(--dz-accent) 10%, transparent);
+}
+/* Interim holder for the pre-redesign views (replaced in Steps 7–10). They
+   use the shadcn tokens above, so they follow the page theme as they are. */
+.dz-page .dz-legacy {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--card-foreground));
+}
+/* SimilarityMatrix and PerturbationControls hardcode light button fills that
+   vanish on a dark card, so their holders stay light in both themes. */
+.dz-page .dz-legacy-light {
+  --background: 0 0% 100%;
+  --foreground: 228 40% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 228 40% 12%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 228 40% 12%;
+  --primary: 243 75% 59%;
+  --secondary: 225 16% 93%;
+  --secondary-foreground: 228 40% 12%;
+  --muted: 225 16% 94%;
+  --muted-foreground: 220 16% 36%;
+  --accent: 225 16% 93%;
+  --accent-foreground: 228 40% 12%;
+  --border: 225 14% 87%;
+  --input: 225 14% 87%;
+  --ring: 243 75% 59%;
+  color-scheme: light;
+}
+
+/* ── Motion ───────────────────────────────────────────────────────────────── */
+.dz-ripple {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: dz-ripple 2.2s cubic-bezier(0.2, 0.7, 0.3, 1) infinite;
+}
+@keyframes dz-ripple {
+  0% { transform: scale(1); opacity: 0.9; }
+  100% { transform: scale(3.2); opacity: 0; }
+}
+
+/* Light sweep across a busy button. */
+.dz-scan { animation: dz-scan 1.6s ease-in-out infinite; }
+@keyframes dz-scan {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+/* Hero: the playhead sweeps across the conversation. */
+.dz-sweep { animation: dz-sweep 7s linear infinite; }
+@keyframes dz-sweep {
+  0% { transform: translateX(0); opacity: 0; }
+  6% { opacity: 1; }
+  94% { opacity: 1; }
+  100% { transform: translateX(var(--dz-sweep-distance, 300px)); opacity: 0; }
+}
+
+/* Run progress: the active stage breathes, its bars bounce. */
+.dz-breathe {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: dz-breathe 1.8s ease-in-out infinite;
+}
+@keyframes dz-breathe {
+  0%, 100% { transform: scale(0.92); opacity: 0.75; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+.dz-bounce {
+  transform-origin: bottom;
+  animation: dz-bounce 1s ease-in-out infinite;
+}
+@keyframes dz-bounce {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+/* Similarity matrix: revealed by a diagonal wipe. The resting value shows the
+   whole matrix, so with animations off (reduced motion, or no @property
+   support) it is simply there. */
+@property --dz-wipe {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 150%;
+}
+.dz-wipe {
+  -webkit-mask-image: linear-gradient(135deg, #000 calc(var(--dz-wipe) - 20%), transparent var(--dz-wipe));
+  mask-image: linear-gradient(135deg, #000 calc(var(--dz-wipe) - 20%), transparent var(--dz-wipe));
+  animation: dz-wipe 1.2s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+@keyframes dz-wipe {
+  from { --dz-wipe: 0%; }
+  to { --dz-wipe: 150%; }
+}
+
+/* What-if: spans where the two runs disagree pulse softly. */
+.dz-diff-pulse { animation: dz-diff-pulse 2.4s ease-in-out infinite; }
+@keyframes dz-diff-pulse {
+  0%, 100% { filter: brightness(1); box-shadow: 0 0 0 0 transparent; }
+  50% { filter: brightness(1.25); box-shadow: 0 0 10px 0 var(--dz-warn); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dz-page *,
+  .dz-page *::before,
+  .dz-page *::after {
+    animation: none !important;
+  }
+}
+
+/* Theme reveal: the toggle animates a growing circle, so switch the View
+   Transitions default crossfade off. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Light theme. Components are written with the dark theme's Tailwind classes;
+   rather than thread a theme through every className, those classes are
+   re-pointed here, scoped to this page only.
+   ════════════════════════════════════════════════════════════════════════════ */
+.dz-page[data-theme="light"] {
+  --background: 225 20% 97%;
+  --foreground: 228 40% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 228 40% 12%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 228 40% 12%;
+  --primary: 243 75% 59%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 225 16% 93%;
+  --secondary-foreground: 228 40% 12%;
+  --muted: 225 16% 94%;
+  --muted-foreground: 220 16% 36%;
+  --accent: 225 16% 93%;
+  --accent-foreground: 228 40% 12%;
+  --destructive: 0 61% 48%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 225 14% 87%;
+  --input: 225 14% 87%;
+  --ring: 243 75% 59%;
+
+  --dz-accent: #4f46e5;
+  --dz-accent-hover: #4338ca;
+  --dz-accent-soft: #4338ca;
+  --dz-warn: #b7791f;
+
+  --dz-canvas: #f6f7fb;
+  --dz-well: #eef0f6;
+  --dz-panel: rgba(255, 255, 255, 0.99);
+  --dz-header: rgba(246, 247, 251, 0.9);
+  --dz-ink: #111827;
+
+  color-scheme: light;
+}
+
+.dz-page[data-theme="light"] .dz-glow {
+  background: radial-gradient(60vmax 35vmax at 50% 0%, rgba(79, 70, 229, 0.06), transparent 70%);
+}
+.dz-page[data-theme="light"] .dz-card {
+  background: #ffffff;
+  border-color: rgba(17, 24, 39, 0.09);
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.05), 0 8px 24px -16px rgba(17, 24, 39, 0.15);
+}
+.dz-page[data-theme="light"] .dz-pill {
+  box-shadow: 0 1px 3px rgba(17, 24, 39, 0.18), 0 0 0 1px rgba(17, 24, 39, 0.06);
+}
+.dz-page[data-theme="light"] .dz-popup-border {
+  box-shadow: 0 0 0 1px rgba(17, 24, 39, 0.1), 0 16px 40px -12px rgba(17, 24, 39, 0.25);
+}
+.dz-page[data-theme="light"] .dz-dropzone {
+  border-color: rgba(17, 24, 39, 0.2);
+  background: rgba(255, 255, 255, 0.6);
+}
+.dz-page[data-theme="light"] .dz-image-fade {
+  /* only behind the caption strip — a full-height white wash bleaches the photo */
+  background: linear-gradient(to top, rgba(255, 255, 255, 0.94) 0%, rgba(255, 255, 255, 0.6) 22%, transparent 48%);
+}
+
+/* text */
+.dz-page[data-theme="light"] .text-white,
+.dz-page[data-theme="light"] .hover\:text-white:hover { color: #111827; }
+.dz-page[data-theme="light"] .text-slate-200 { color: #1e293b; }
+.dz-page[data-theme="light"] .text-slate-300 { color: #334155; }
+.dz-page[data-theme="light"] .text-slate-400 { color: #475569; }
+.dz-page[data-theme="light"] .text-slate-500 { color: #64748b; }
+.dz-page[data-theme="light"] .text-rose-200 { color: #b42318; }
+.dz-page[data-theme="light"] .text-emerald-200,
+.dz-page[data-theme="light"] .text-emerald-300 { color: #047857; }
+.dz-page[data-theme="light"] .text-amber-200,
+.dz-page[data-theme="light"] .text-amber-300 { color: #b45309; }
+/* active segments keep dark text on their white pill */
+.dz-page[data-theme="light"] .aria-checked\:text-slate-950[aria-checked="true"] { color: #020617; }
+
+/* translucent white washes become translucent ink */
+.dz-page[data-theme="light"] .bg-white\/\[0\.02\] { background-color: rgba(17, 24, 39, 0.02); }
+.dz-page[data-theme="light"] .bg-white\/\[0\.035\] { background-color: rgba(255, 255, 255, 0.7); }
+.dz-page[data-theme="light"] .bg-white\/5 { background-color: rgba(17, 24, 39, 0.05); }
+.dz-page[data-theme="light"] .bg-white\/10 { background-color: rgba(17, 24, 39, 0.07); }
+.dz-page[data-theme="light"] .hover\:bg-white\/5:hover { background-color: rgba(17, 24, 39, 0.05); }
+.dz-page[data-theme="light"] .hover\:bg-white\/10:hover { background-color: rgba(17, 24, 39, 0.07); }
+.dz-page[data-theme="light"] .hover\:bg-white\/\[0\.07\]:hover { background-color: #ffffff; }
+
+/* hairlines */
+.dz-page[data-theme="light"] .ring-white\/10 { --tw-ring-color: rgba(17, 24, 39, 0.1); }
+.dz-page[data-theme="light"] .ring-white\/20 { --tw-ring-color: rgba(17, 24, 39, 0.18); }
+.dz-page[data-theme="light"] .border-white\/10 { border-color: rgba(17, 24, 39, 0.1); }

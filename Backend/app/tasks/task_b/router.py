@@ -7,13 +7,13 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from app.core.redis import cache_result, get_result
 from app.services.dataset_service import media_type_for
+from app.tasks.verification.audio_streaming import stream_audio_file
 
 from . import diff, perturbation, uploads
 from .dataset import (
@@ -73,13 +73,15 @@ async def dataset_recording(recording_id: str):
 
 
 @router.get("/dataset/recordings/{recording_id}/audio")
-async def dataset_recording_audio(recording_id: str):
-    """Serve the audio itself so the frontend player can seek segments."""
+async def dataset_recording_audio(request: Request, recording_id: str):
+    """Serve the audio itself so the frontend player can seek segments.
+    Range requests get a real 206, so seeking deep into a long meeting does
+    not depend on how much the browser has already buffered."""
     try:
         path = resolve_recording_path(recording_id)
     except (DatasetUnavailable, RecordingNotFound) as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    return FileResponse(path, media_type="audio/wav", filename=path.name)
+    return stream_audio_file(path, request, path.name, "audio/wav")
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +163,7 @@ async def uploaded_recording_audio(request: Request, upload_id: str):
         media_type = media_type_for(path)
     except ValueError as error:
         raise HTTPException(status_code=415, detail=str(error)) from error
-    return FileResponse(path, media_type=media_type, filename=path.name)
+    return stream_audio_file(path, request, path.name, media_type)
 
 
 class RunRequest(BaseModel):
@@ -233,40 +235,59 @@ async def run(request: Request, run_request: RunRequest):
 
 
 @router.get("/projection")
-async def projection(request: Request, model: str, recording_id: str):
-    """2D PCA of segment embeddings → [{id, x, y, speaker, confidence}]."""
+async def projection(
+    request: Request,
+    model: str,
+    recording_id: str,
+    dims: int = Query(2, ge=2, le=3),
+):
+    """PCA of segment embeddings to 2D or 3D → [{id, x, y[, z], speaker, confidence}].
+
+    ``z`` is only present when ``dims=3``. ``explained_variance`` is each
+    axis's share of the embeddings' variance, so a UI can say how much of the
+    256-d space the map actually shows.
+    """
     result = await _get_or_compute(model, recording_id, _require_sid(request))
 
     embeddings = result.get("embeddings", {})
-    if len(embeddings) < 2:
+    # PCA to k components needs at least k points.
+    if len(embeddings) < dims:
         raise HTTPException(
             status_code=422,
-            detail="Not enough embeddable segments for a 2D projection.",
+            detail=f"Not enough embeddable segments for a {dims}D projection.",
         )
 
-    def _pca() -> list[dict]:
+    def _pca() -> tuple[list[dict], list[float]]:
         import numpy as np
         from sklearn.decomposition import PCA
 
         segment_ids = list(embeddings.keys())
         matrix = np.asarray([embeddings[i] for i in segment_ids], dtype=np.float32)
-        coords = PCA(n_components=2).fit_transform(matrix)
+        pca = PCA(n_components=dims)
+        coords = pca.fit_transform(matrix)
         by_id = {s["id"]: s for s in result["segments"]}
-        return [
-            {
+        points = []
+        for segment_id, row in zip(segment_ids, coords):
+            point = {
                 "id": segment_id,
-                "x": round(float(x), 4),
-                "y": round(float(y), 4),
+                "x": round(float(row[0]), 4),
+                "y": round(float(row[1]), 4),
                 "speaker": by_id[segment_id]["speaker"],
                 "confidence": by_id[segment_id]["confidence"],
             }
-            for segment_id, (x, y) in zip(segment_ids, coords)
-        ]
+            if dims == 3:
+                point["z"] = round(float(row[2]), 4)
+            points.append(point)
+        variance = [round(float(v), 4) for v in pca.explained_variance_ratio_]
+        return points, variance
 
+    points, explained_variance = await run_in_threadpool(_pca)
     return {
         "model": model,
         "recording_id": recording_id,
-        "points": await run_in_threadpool(_pca),
+        "dims": dims,
+        "explained_variance": explained_variance,
+        "points": points,
     }
 
 
@@ -288,6 +309,59 @@ class PerturbationRequest(BaseModel):
     perturbation: PerturbationSpec
 
 
+class PerturbationPreviewRequest(BaseModel):
+    recording_id: str
+    perturbation: PerturbationSpec
+
+
+async def _perturb_for_request(
+    recording_id: str, spec: PerturbationSpec, sid: str
+) -> tuple[str, str, Path, dict[str, Any]]:
+    """Build (or reuse) the perturbed clip for one request. Returns
+    `(source_hash, perturbed_id, perturbed_path, normalized_params)`.
+
+    Shared by the preview and the full run, so both land on the same
+    deterministic `prt_` file: previewing first never costs a second write.
+    """
+
+    source_path = await _resolve_audio_source(recording_id, sid)
+    source_hash = await run_in_threadpool(file_sha256, source_path)
+
+    try:
+        perturbed_id, perturbed_path, normalized_params = await run_in_threadpool(
+            perturbation.perturb_to_session,
+            source_path,
+            sid,
+            source_hash,
+            spec.type,
+            spec.params,
+        )
+    except uploads.InvalidSessionId as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ValueError as error:
+        # Unknown type, bad params, a no-op transform, or invalid output --
+        # all of them are "your request could not be carried out", not an
+        # infrastructure failure.
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    return source_hash, perturbed_id, perturbed_path, normalized_params
+
+
+@router.post("/perturbation/preview")
+async def preview_perturbation(request: Request, payload: PerturbationPreviewRequest):
+    """Build the perturbed clip only -- no diarization -- so the user can hear
+    the change before paying minutes of CPU to re-run the model on it."""
+
+    sid = _require_sid(request)
+    _, perturbed_id, _, normalized_params = await _perturb_for_request(
+        payload.recording_id, payload.perturbation, sid
+    )
+    return {
+        "perturbed_id": perturbed_id,
+        "perturbation": {"type": payload.perturbation.type, "params": normalized_params},
+    }
+
+
 @router.get("/perturbed/{perturbed_id}/audio")
 async def perturbed_audio(request: Request, perturbed_id: str):
     """Serve a perturbed clip so the UI can play the degraded audio next to
@@ -298,7 +372,7 @@ async def perturbed_audio(request: Request, perturbed_id: str):
         path = await run_in_threadpool(uploads.resolve_perturbed_path, perturbed_id, sid)
     except uploads.PerturbedNotFound as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    return FileResponse(path, media_type="audio/wav", filename=path.name)
+    return stream_audio_file(path, request, path.name, "audio/wav")
 
 
 @router.post("/perturbation")
@@ -319,25 +393,9 @@ async def run_perturbation(request: Request, payload: PerturbationRequest):
     except UnsupportedDiarizationModel as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
-    source_path = await _resolve_audio_source(payload.recording_id, sid)
-    source_hash = await run_in_threadpool(file_sha256, source_path)
-
-    try:
-        perturbed_id, perturbed_path, normalized_params = await run_in_threadpool(
-            perturbation.perturb_to_session,
-            source_path,
-            sid,
-            source_hash,
-            payload.perturbation.type,
-            payload.perturbation.params,
-        )
-    except uploads.InvalidSessionId as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    except ValueError as error:
-        # Unknown type, bad params, a no-op transform, or invalid output --
-        # all of them are "your request could not be carried out", not an
-        # infrastructure failure.
-        raise HTTPException(status_code=422, detail=str(error)) from error
+    source_hash, perturbed_id, perturbed_path, normalized_params = await _perturb_for_request(
+        payload.recording_id, payload.perturbation, sid
+    )
 
     perturbed_hash = await run_in_threadpool(file_sha256, perturbed_path)
     delta_cache_key = f"diar-delta:{payload.model}"

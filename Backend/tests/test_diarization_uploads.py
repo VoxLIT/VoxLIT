@@ -348,6 +348,20 @@ async def test_uploaded_audio_is_served_back(client, storage_root):
     assert response.status_code == 200
     assert response.content == payload
     assert response.headers["content-type"] == "audio/wav"
+    assert response.headers["accept-ranges"] == "bytes"
+
+
+@pytest.mark.asyncio
+async def test_uploaded_audio_honours_range_with_a_206(client, storage_root):
+    payload = _wav_bytes(freq=330.0)
+    upload_id = (await _upload(client, content=payload)).json()["recording_id"]
+
+    response = await client.get(f"{BASE}/uploads/{upload_id}/audio", headers={"Range": "bytes=100-199"})
+
+    assert response.status_code == 206
+    assert response.content == payload[100:200]
+    assert response.headers["content-range"] == f"bytes 100-199/{len(payload)}"
+    assert response.headers["content-type"] == "audio/wav"
 
 
 @pytest.mark.parametrize(
@@ -373,6 +387,68 @@ async def test_one_session_cannot_read_another_sessions_upload(client, storage_r
 
     assert response.status_code == 404
     assert listing.json() == {"total_uploads": 0, "uploads": []}
+
+
+# ---------------------------------------------------------------------------
+# Perturbed clip playback (GET /perturbed/{id}/audio)
+# ---------------------------------------------------------------------------
+
+
+async def _write_perturbed_clip(client, storage_root, perturbed_id="prt_deadbeef") -> bytes:
+    """A perturbed clip lives in the same session directory as uploads; an
+    upload creates that directory for this client's session."""
+
+    await _upload(client)
+    payload = _wav_bytes(freq=550.0)
+    session_dir = next(storage_root.iterdir())
+    (session_dir / f"{perturbed_id}.wav").write_bytes(payload)
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_perturbed_audio_is_served_back_whole(client, storage_root):
+    payload = await _write_perturbed_clip(client, storage_root)
+
+    response = await client.get(f"{BASE}/perturbed/prt_deadbeef/audio")
+
+    assert response.status_code == 200
+    assert response.content == payload
+    assert response.headers["content-type"] == "audio/wav"
+    assert response.headers["accept-ranges"] == "bytes"
+
+
+@pytest.mark.asyncio
+async def test_perturbed_audio_honours_range_with_a_206(client, storage_root):
+    payload = await _write_perturbed_clip(client, storage_root)
+
+    response = await client.get(f"{BASE}/perturbed/prt_deadbeef/audio", headers={"Range": "bytes=44-"})
+
+    assert response.status_code == 206
+    assert response.content == payload[44:]
+    assert response.headers["content-range"] == f"bytes 44-{len(payload) - 1}/{len(payload)}"
+
+
+@pytest.mark.parametrize(
+    "bad_id",
+    ["prt_unknown", "not-a-perturbed-id", "../../etc/passwd", "prt_" + "0" * 32],
+)
+@pytest.mark.asyncio
+async def test_perturbed_audio_404s_for_unknown_and_traversal_ids(client, storage_root, bad_id):
+    await _write_perturbed_clip(client, storage_root)
+
+    response = await client.get(f"{BASE}/perturbed/{bad_id}/audio")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_one_session_cannot_read_another_sessions_perturbed_clip(client, storage_root):
+    await _write_perturbed_clip(client, storage_root)
+
+    async with AsyncClient(app=app, base_url="http://test", follow_redirects=True) as other:
+        response = await other.get(f"{BASE}/perturbed/prt_deadbeef/audio")
+
+    assert response.status_code == 404
 
 
 @pytest.mark.asyncio
