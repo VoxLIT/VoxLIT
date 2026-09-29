@@ -1,6 +1,6 @@
 /**
- * SegmentMap — Step 3 of the diarization page: selected segment | 2D map |
- * nearest segments. Covers the disabled 3D pill, the rule that selection is
+ * SegmentMap — Step 3 of the diarization page: selected segment | 2D/3D map |
+ * nearest segments. Covers the 2D/3D switch, the rule that selection is
  * shown by size and never by a new colour, neighbours coming from embeddings
  * rather than the map, and the side columns surviving a failed projection.
  */
@@ -8,13 +8,48 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { SegmentMap } from "../page/SegmentMap";
 import { DARK_PALETTE } from "../page/palette";
-import { projection, result } from "./fixtures";
+import { projection, projection3d, result } from "./fixtures";
+
+// jsdom has no WebGL, so the three.js scene is replaced by a stand-in that
+// exposes what SegmentMap hands it.
+vi.mock("../page/SegmentMap3D", () => ({
+  default: ({
+    points,
+    neighbourIds,
+    onSelect,
+    onHover,
+  }: {
+    points: { id: string; z?: number }[];
+    neighbourIds: string[];
+    onSelect: (id: string) => void;
+    onHover: (event: { segmentId: string; clientX: number; clientY: number } | null) => void;
+  }) => (
+    <div data-testid="segment-map-3d" data-neighbours={neighbourIds.join(",")}>
+      {points.map((point) => (
+        <button
+          key={point.id}
+          type="button"
+          data-testid="map3d-point"
+          data-z={point.z}
+          onClick={() => onSelect(point.id)}
+          onMouseEnter={() => onHover({ segmentId: point.id, clientX: 10, clientY: 10 })}
+        >
+          {point.id}
+        </button>
+      ))}
+    </div>
+  ),
+}));
 
 const renderMap = (overrides: Partial<Parameters<typeof SegmentMap>[0]> = {}) => {
   const props = {
     result,
     projection,
     projectionError: null,
+    dims: 2 as const,
+    onDimsChange: vi.fn(),
+    projection3d: null,
+    projection3dError: null,
     isRunning: false,
     embeddingDimension: 256,
     selectedId: null,
@@ -32,14 +67,60 @@ const pointFor = (id: string) =>
   screen.getAllByTestId("map-point").find((node) => node.getAttribute("data-segment-id") === id)!;
 
 describe("SegmentMap", () => {
-  it("offers 2D only, with 3D shown disabled as coming soon", () => {
-    renderMap();
+  it("starts in 2D and asks for 3D when the 3D pill is clicked", () => {
+    const props = renderMap();
     const group = screen.getByRole("radiogroup", { name: "Dimensions" });
     expect(within(group).getByRole("radio", { name: /2D/ })).toHaveAttribute("aria-checked", "true");
     const threeD = within(group).getByRole("radio", { name: /3D/ });
-    expect(threeD).toHaveAttribute("aria-disabled", "true");
     expect(threeD).toHaveAttribute("aria-checked", "false");
-    expect(threeD).toHaveAttribute("title", "coming soon");
+    expect(threeD).not.toHaveAttribute("aria-disabled");
+    fireEvent.click(threeD);
+    expect(props.onDimsChange).toHaveBeenCalledWith(3);
+  });
+
+  it("says the 3D layout is on its way until it arrives", () => {
+    renderMap({ dims: 3 });
+    expect(screen.getByRole("status")).toHaveTextContent(/laying out the 3d map/i);
+    expect(screen.queryAllByTestId("map-point")).toHaveLength(0);
+  });
+
+  it("draws the 3D map from the 3D projection, with embedding-space neighbours", async () => {
+    const props = renderMap({ dims: 3, projection3d, selectedId: "seg_1" });
+    const scene = await screen.findByTestId("segment-map-3d");
+    const balls = within(scene).getAllByTestId("map3d-point");
+    expect(balls).toHaveLength(projection3d.points.length);
+    expect(balls[0]).toHaveAttribute("data-z", "-1.5");
+    // Same neighbours as the side list — cosine in the model's space, not map distance.
+    expect(scene).toHaveAttribute("data-neighbours", "seg_4,seg_2,seg_3");
+    expect(screen.queryAllByTestId("map-point")).toHaveLength(0);
+    fireEvent.click(balls[2]);
+    expect(props.onSelect).toHaveBeenCalledWith("seg_3");
+  });
+
+  it("opens the same hover card from a 3D ball", async () => {
+    const props = renderMap({ dims: 3, projection3d });
+    fireEvent.mouseEnter(await screen.findByRole("button", { name: "seg_2" }));
+    expect(props.onHover).toHaveBeenCalledWith("seg_2");
+    expect(await screen.findByRole("dialog", { name: /SPEAKER_00, 00:03.5/ })).toBeInTheDocument();
+  });
+
+  it("shows a failed 3D layout without touching the side columns", () => {
+    renderMap({
+      dims: 3,
+      projection3dError: "Not enough embeddable segments for a 3D projection.",
+      selectedId: "seg_1",
+    });
+    expect(screen.getByText(/couldn.t lay out the map/i)).toHaveTextContent("3D projection");
+    expect(screen.getAllByTestId("neighbour-row")).toHaveLength(3);
+  });
+
+  it("reports how much of the variation the 3D axes keep", () => {
+    renderMap({ dims: 3, projection3d });
+    fireEvent.click(screen.getByRole("button", { name: /technical details/i }));
+    expect(screen.getByText(/projected to 3D with PCA/)).toBeInTheDocument();
+    expect(screen.getByText(/These 3 axes keep 92% of the variation/)).toHaveTextContent(
+      "axis 1: 50%, axis 2: 30%, axis 3: 12%",
+    );
   });
 
   it("draws one dot per embedded segment, in its speaker's colour", () => {

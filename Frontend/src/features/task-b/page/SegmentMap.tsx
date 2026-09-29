@@ -1,20 +1,28 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { AlertTriangle, Box, Check, Loader2, MousePointerClick, Orbit, Play, Square } from "lucide-react";
-import type { DiarizationResult, DiarizationSegment, ProjectionResult } from "../types";
+import type { DiarizationResult, ProjectionDims, ProjectionResult } from "../types";
 import { nearestByCosine } from "./neighbours";
 import { SegmentMap2D, type MapPointerEvent } from "./SegmentMap2D";
 import { POPUP_HEIGHT, POPUP_WIDTH, SegmentPopup } from "./SegmentPopup";
 import { confidenceWords, formatClock } from "./segmentWords";
 import { usePalette } from "./theme";
-import { Disclosure, Finding } from "./ui";
+import { Disclosure, Finding, SpeakerChip } from "./ui";
 
 const NEIGHBOURS = 5;
+
+// three.js is only downloaded once someone actually opens the 3D view.
+const SegmentMap3D = lazy(() => import("./SegmentMap3D"));
 
 interface SegmentMapProps {
   result: DiarizationResult;
   projection: ProjectionResult | null;
   projectionError: string | null;
+  /** Which layout is on screen. The 3D one is fetched on first use. */
+  dims: ProjectionDims;
+  onDimsChange: (dims: ProjectionDims) => void;
+  projection3d: ProjectionResult | null;
+  projection3dError: string | null;
   /** True while /run or /projection is still in flight. */
   isRunning: boolean;
   embeddingDimension: number | null;
@@ -32,12 +40,16 @@ interface SegmentMapProps {
  * Step 3: which voices sound alike. The selected segment on the left, the
  * map of every segment in the centre, and the selected segment's nearest
  * segments on the right. The side columns come from `result.embeddings`, so
- * they keep working when the 2D projection could not be computed.
+ * they keep working when the projection could not be computed.
  */
 export const SegmentMap = ({
   result,
   projection,
   projectionError,
+  dims,
+  onDimsChange,
+  projection3d,
+  projection3dError,
   isRunning,
   embeddingDimension,
   selectedId,
@@ -55,6 +67,8 @@ export const SegmentMap = ({
     [result.embeddings, selectedId],
   );
   const notEmbedded = result.segments.length - Object.keys(result.embeddings).length;
+  const shown = dims === 3 ? projection3d : projection;
+  const shownError = dims === 3 ? projection3dError : projectionError;
 
   // --- hover card ------------------------------------------------------------
   const frame = useRef<HTMLDivElement>(null);
@@ -69,9 +83,9 @@ export const SegmentMap = ({
     }, 220);
   }, [onHover]);
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
-  // A new projection unmounts the hovered point without a mouse-leave, which
-  // would strand its card on screen.
-  useEffect(() => setHover(null), [projection]);
+  // A new projection (or 2D ↔ 3D) unmounts the hovered point without a
+  // mouse-leave, which would strand its card on screen.
+  useEffect(() => setHover(null), [shown]);
 
   const handleHover = useCallback(
     (event: MapPointerEvent | null) => {
@@ -152,30 +166,28 @@ export const SegmentMap = ({
           <h3 className="font-display text-lg font-semibold text-white">Segment map</h3>
         </div>
         <div className="ml-auto flex rounded-full bg-white/5 p-1 ring-1 ring-white/10" role="radiogroup" aria-label="Dimensions">
-          <button
-            type="button"
-            role="radio"
-            aria-checked
-            className="relative flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold text-slate-950"
-          >
-            <span className="absolute inset-0 rounded-full dz-pill" />
-            <span className="relative flex items-center gap-1">
-              <Square className="h-3 w-3" /> 2D
-            </span>
-          </button>
-          {/* The projection endpoint only returns 2D PCA today. aria-disabled, not
-              `disabled`, so the "coming soon" tooltip still shows on hover. */}
-          <button
-            type="button"
-            role="radio"
-            aria-checked={false}
-            aria-disabled="true"
-            title="coming soon"
-            className="flex cursor-not-allowed items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold text-slate-400 opacity-60"
-          >
-            <Box className="h-3 w-3" /> 3D
-            <span className="rounded-full bg-white/10 px-1.5 text-[10px] font-medium">soon</span>
-          </button>
+          {([2, 3] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="radio"
+              aria-checked={dims === option}
+              onClick={() => onDimsChange(option)}
+              className="relative flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold text-slate-300 transition-colors hover:text-white aria-checked:text-slate-950"
+            >
+              {dims === option && (
+                <motion.span
+                  layoutId="dz-dim-pill"
+                  className="absolute inset-0 rounded-full dz-pill"
+                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                />
+              )}
+              <span className="relative flex items-center gap-1">
+                {option === 3 ? <Box className="h-3 w-3" /> : <Square className="h-3 w-3" />}
+                {option}D
+              </span>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -229,9 +241,9 @@ export const SegmentMap = ({
           className="dz-well relative h-[380px] overflow-hidden rounded-2xl ring-1 ring-white/10 sm:h-[480px]"
           onMouseLeave={scheduleClose}
         >
-          {projection ? (
+          {shown && dims === 2 ? (
             <SegmentMap2D
-              points={projection.points}
+              points={shown.points}
               segmentsById={segmentsById}
               speakers={result.speakers}
               selectedId={selectedId}
@@ -240,20 +252,35 @@ export const SegmentMap = ({
               onHover={handleHover}
               onSelect={onSelect}
             />
-          ) : projectionError ? (
+          ) : shown ? (
+            <>
+              <Suspense fallback={<MapLoading label="Loading the 3D view…" />}>
+                <SegmentMap3D
+                  points={shown.points}
+                  segmentsById={segmentsById}
+                  speakers={result.speakers}
+                  selectedId={selectedId}
+                  hoveredId={hoveredId}
+                  neighbourIds={neighbours.map((n) => n.id)}
+                  onHover={handleHover}
+                  onSelect={onSelect}
+                />
+              </Suspense>
+              <p className="pointer-events-none absolute bottom-3 left-3 text-[11px] text-slate-400">
+                Drag to rotate · scroll to zoom
+              </p>
+            </>
+          ) : shownError ? (
             <div role="status" className="absolute inset-0 grid place-items-center p-6">
               <div className="max-w-sm text-center">
                 <AlertTriangle className="mx-auto h-6 w-6" style={{ color: WARN }} />
-                <p className="mt-2 text-sm text-slate-200">Couldn&apos;t lay out the map: {projectionError}</p>
+                <p className="mt-2 text-sm text-slate-200">Couldn&apos;t lay out the map: {shownError}</p>
                 <p className="mt-1 text-xs text-slate-400">The timeline and the nearest-segment list still work.</p>
               </div>
             </div>
-          ) : isRunning ? (
-            <div role="status" className="absolute inset-0 grid place-items-center text-sm text-slate-400">
-              <span className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" /> Laying out the map…
-              </span>
-            </div>
+          ) : isRunning || dims === 3 ? (
+            // In 3D with nothing to show yet, the 3D layout is on its way.
+            <MapLoading label={dims === 3 ? "Laying out the 3D map…" : "Laying out the map…"} />
           ) : null}
           <AnimatePresence>{popup}</AnimatePresence>
         </div>
@@ -321,10 +348,18 @@ export const SegmentMap = ({
       <Disclosure>
         <p>
           Each dot is one segment&apos;s speaker embedding
-          {embeddingDimension ? ` (${embeddingDimension} numbers)` : ""}, projected to 2D with PCA. Distances on the
+          {embeddingDimension ? ` (${embeddingDimension} numbers)` : ""}, projected to {dims}D with PCA. Distances on the
           map are approximate. The &ldquo;sounds most like&rdquo; list uses cosine similarity in the full embedding
           space, so it can disagree with what looks close on the map.
         </p>
+        {shown?.explained_variance && shown.explained_variance.length > 0 && (
+          <p>
+            These {shown.explained_variance.length} axes keep{" "}
+            {percent(shown.explained_variance.reduce((sum, share) => sum + share, 0))} of the variation between
+            segments ({shown.explained_variance.map((share, axis) => `axis ${axis + 1}: ${percent(share)}`).join(", ")}
+            ).{dims === 3 && " If the third axis adds little, the 3D view is mostly the 2D map, tilted."}
+          </p>
+        )}
         <p>
           {Object.keys(result.embeddings).length} of {result.segments.length} segments are on the map.
           {notEmbedded > 0 && ` ${notEmbedded} were too short to embed (under 0.4 s) and have no dot.`}
@@ -354,12 +389,12 @@ export const SegmentMap = ({
   );
 };
 
-const SpeakerChip = ({ speaker, colour }: { speaker: DiarizationSegment["speaker"]; colour: string }) => (
-  <span
-    className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold text-white"
-    style={{ background: `color-mix(in srgb, ${colour} 22%, transparent)`, boxShadow: `inset 0 0 0 1px ${colour}` }}
-  >
-    <span className="h-2 w-2 rounded-full" style={{ background: colour }} />
-    {speaker}
-  </span>
+const percent = (share: number) => `${Math.round(share * 100)}%`;
+
+const MapLoading = ({ label }: { label: string }) => (
+  <div role="status" className="absolute inset-0 grid place-items-center text-sm text-slate-400">
+    <span className="flex items-center gap-2">
+      <Loader2 className="h-4 w-4 animate-spin" /> {label}
+    </span>
+  </div>
 );

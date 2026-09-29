@@ -18,6 +18,9 @@ export interface Palette {
   ink: (alpha: number) => string;
   /** The page background, for fills that must read as "cut out" of a chart. */
   CANVAS: string;
+  /** Top of the similarity matrix's sequential ramp (bottom is CANVAS): an
+   *  indigo far from the page background, and not a speaker colour. */
+  HEAT: string;
   /** A speaker's colour, by their position in the run's `speakers` list. */
   speakerColor: (speakers: string[], speaker: string) => string;
 }
@@ -32,6 +35,7 @@ export const DARK_PALETTE: Palette = {
   INK: "#e6e9f2",
   ink: (alpha) => `rgba(230,233,242,${alpha})`,
   CANVAS: "#0b0d16",
+  HEAT: "#a5b4fc",
   speakerColor: colourFor(SPEAKERS_DARK),
 };
 
@@ -42,5 +46,6 @@ export const LIGHT_PALETTE: Palette = {
   INK: "#111827",
   ink: (alpha) => `rgba(17,24,39,${alpha})`,
   CANVAS: "#f6f7fb",
+  HEAT: "#312e81",
   speakerColor: colourFor(SPEAKERS_LIGHT),
 };

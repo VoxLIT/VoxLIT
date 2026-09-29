@@ -159,3 +159,14 @@ export const PrimaryButton = ({
     <span className="relative inline-flex items-center gap-2">{children}</span>
   </motion.button>
 );
+
+/** A speaker's name on a tint of their own colour. */
+export const SpeakerChip = ({ speaker, colour }: { speaker: string; colour: string }) => (
+  <span
+    className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold text-white"
+    style={{ background: `color-mix(in srgb, ${colour} 22%, transparent)`, boxShadow: `inset 0 0 0 1px ${colour}` }}
+  >
+    <span className="h-2 w-2 rounded-full" style={{ background: colour }} />
+    {speaker}
+  </span>
+);

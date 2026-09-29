@@ -4,8 +4,10 @@ import { noisePercentToLevel } from "../PerturbationControls";
 import {
   DiarizationModelInfo,
   DiarizationResult,
+  PerturbationPreview,
   PerturbationResult,
   PerturbationType,
+  ProjectionDims,
   ProjectionResult,
   RecordingInfo,
 } from "../types";
@@ -30,11 +32,17 @@ export function useDiarization(model: string) {
   const [uploads, setUploads] = useState<RecordingInfo[]>([]);
   const [models, setModels] = useState<DiarizationModelInfo[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isLoadingRecordings, setIsLoadingRecordings] = useState(true);
   const [selectedRecordingId, setSelectedRecordingId] = useState<string>("");
   const [result, setResult] = useState<DiarizationResult | null>(null);
   const [projection, setProjection] = useState<ProjectionResult | null>(null);
   // Kept apart from `error`: a map that cannot be drawn is not a failed run.
   const [projectionError, setProjectionError] = useState<string | null>(null);
+  // The 3D layout is fetched only once someone asks for it, then kept until
+  // the run it belongs to is replaced. The 2D/3D choice itself survives runs.
+  const [mapDims, setMapDims] = useState<ProjectionDims>(2);
+  const [projection3d, setProjection3d] = useState<ProjectionResult | null>(null);
+  const [projection3dError, setProjection3dError] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -51,6 +59,11 @@ export function useDiarization(model: string) {
   // A perturbed run can take minutes, so an abandoned one must not land on
   // top of a newer selection. Same guard the verification workbench uses.
   const perturbationAbortRef = useRef<AbortController | null>(null);
+  // The changed clip on its own, built so it can be heard before the (slow)
+  // second run. Same id as that run's perturbed clip.
+  const [preview, setPreview] = useState<PerturbationPreview | null>(null);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const previewAbortRef = useRef<AbortController | null>(null);
   const perturbedAudioRef = useRef<HTMLAudioElement>(null);
 
   /** Anything that changes which audio is under test invalidates a perturbed
@@ -59,8 +72,19 @@ export function useDiarization(model: string) {
   const resetPerturbation = () => {
     perturbationAbortRef.current?.abort();
     perturbationAbortRef.current = null;
+    previewAbortRef.current?.abort();
+    previewAbortRef.current = null;
     setPerturbation(null);
+    setPreview(null);
     setPerturbationError(null);
+  };
+
+  /** Both map layouts belong to one run of one model on one recording. */
+  const clearMaps = () => {
+    setProjection(null);
+    setProjectionError(null);
+    setProjection3d(null);
+    setProjection3dError(null);
   };
 
   // Changing any perturbation setting invalidates the current comparison.
@@ -116,6 +140,8 @@ export function useDiarization(model: string) {
         setRecordings(payload.recordings as RecordingInfo[]);
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Could not list recordings.");
+      } finally {
+        setIsLoadingRecordings(false);
       }
     };
     const loadUploads = async () => {
@@ -154,8 +180,7 @@ export function useDiarization(model: string) {
   const select = (recordingId: string) => {
     setSelectedRecordingId(recordingId);
     setResult(null);
-    setProjection(null);
-    setProjectionError(null);
+    clearMaps();
     setSelectedId(null);
     setError(null);
     resetPerturbation();
@@ -183,8 +208,7 @@ export function useDiarization(model: string) {
       // Select it right away — uploading it is the intent to diarize it.
       setSelectedRecordingId(uploaded.recording_id);
       setResult(null);
-      setProjection(null);
-      setProjectionError(null);
+      clearMaps();
       setSelectedId(null);
       resetPerturbation();
     } catch (caught) {
@@ -194,13 +218,28 @@ export function useDiarization(model: string) {
     }
   };
 
+  /** PCA of the cached run's embeddings. Never re-diarizes: /projection reads
+   *  the same cache entry /run just wrote. */
+  const fetchProjection = async (dims: ProjectionDims, signal?: AbortSignal): Promise<ProjectionResult> => {
+    const response = await fetch(
+      `${API_BASE}/tasks/task-b/projection?model=${encodeURIComponent(
+        model
+      )}&recording_id=${encodeURIComponent(selectedRecordingId)}&dims=${dims}`,
+      { credentials: "include", signal }
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.detail || `Projection failed (${response.status})`);
+    }
+    return payload as ProjectionResult;
+  };
+
   const run = async () => {
     if (!selectedRecordingId || !model) return;
     setIsRunning(true);
     setError(null);
     setResult(null);
-    setProjection(null);
-    setProjectionError(null);
+    clearMaps();
     setSelectedId(null);
 
     try {
@@ -224,17 +263,7 @@ export function useDiarization(model: string) {
     // Its own try: a projection failure (e.g. too few segments, 422) must not
     // hide the timeline or show up as a failed run.
     try {
-      const projectionResponse = await fetch(
-        `${API_BASE}/tasks/task-b/projection?model=${encodeURIComponent(
-          model
-        )}&recording_id=${encodeURIComponent(selectedRecordingId)}`,
-        { credentials: "include" }
-      );
-      const projectionPayload = await projectionResponse.json().catch(() => ({}));
-      if (!projectionResponse.ok) {
-        throw new Error(projectionPayload.detail || `Projection failed (${projectionResponse.status})`);
-      }
-      setProjection(projectionPayload as ProjectionResult);
+      setProjection(await fetchProjection(2));
     } catch (caught) {
       setProjectionError(caught instanceof Error ? caught.message : "Projection failed.");
     } finally {
@@ -250,8 +279,7 @@ export function useDiarization(model: string) {
    *  recording list and the selected recording are deliberately untouched. */
   useEffect(() => {
     setResult(null);
-    setProjection(null);
-    setProjectionError(null);
+    clearMaps();
     setSelectedId(null);
     resetPerturbation();
     // Only a model change triggers this; resetPerturbation touches refs and
@@ -259,10 +287,71 @@ export function useDiarization(model: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model]);
 
+  /** Lay out the 3D map the first time it is wanted for this run. Waits for
+   *  the run to finish so it never races the 2D request for the same cache
+   *  entry, and aborts if the run is replaced while it is in flight. */
+  useEffect(() => {
+    if (mapDims !== 3 || !result || isRunning || projection3d || projection3dError) return;
+    const controller = new AbortController();
+    fetchProjection(3, controller.signal)
+      .then(setProjection3d)
+      .catch((caught) => {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+        setProjection3dError(caught instanceof Error ? caught.message : "Projection failed.");
+      });
+    return () => controller.abort();
+    // fetchProjection reads model and the selected recording, and `result` is
+    // cleared whenever either changes, so `result` stands in for both.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapDims, result, isRunning, projection3d, projection3dError]);
+
   /** Empty until /models resolves, and for a key the backend does not know —
    *  a missing note renders nothing rather than breaking the header. */
   const glassBoxNote = models.find((m) => m.key === model)?.glass_box_note ?? "";
   const embeddingDimension = models.find((m) => m.key === model)?.embedding_dimension ?? null;
+
+  const perturbationParams = () =>
+    perturbationType === "noise"
+      ? { noise_level: noisePercentToLevel(noisePercent) }
+      : { mask_start_percent: maskRange[0], mask_end_percent: maskRange[1] };
+
+  /** Build the changed clip without diarizing it, so it can be played first. */
+  const previewPerturbation = async () => {
+    if (!selectedRecordingId) return;
+
+    previewAbortRef.current?.abort();
+    const controller = new AbortController();
+    previewAbortRef.current = controller;
+
+    setIsPreviewing(true);
+    setPerturbationError(null);
+
+    try {
+      const response = await fetch(`${API_BASE}/tasks/task-b/perturbation/preview`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recording_id: selectedRecordingId,
+          perturbation: { type: perturbationType, params: perturbationParams() },
+        }),
+        signal: controller.signal,
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || `Could not build the changed audio (${response.status})`);
+      }
+      setPreview(payload as PerturbationPreview);
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      setPerturbationError(caught instanceof Error ? caught.message : "Could not build the changed audio.");
+    } finally {
+      setIsPreviewing(false);
+      if (previewAbortRef.current === controller) {
+        previewAbortRef.current = null;
+      }
+    }
+  };
 
   const runPerturbation = async () => {
     if (!selectedRecordingId || !model) return;
@@ -275,10 +364,7 @@ export function useDiarization(model: string) {
     setPerturbationError(null);
     setPerturbation(null);
 
-    const params =
-      perturbationType === "noise"
-        ? { noise_level: noisePercentToLevel(noisePercent) }
-        : { mask_start_percent: maskRange[0], mask_end_percent: maskRange[1] };
+    const params = perturbationParams();
 
     try {
       const response = await fetch(`${API_BASE}/tasks/task-b/perturbation`, {
@@ -332,14 +418,18 @@ export function useDiarization(model: string) {
   };
 
   const audioUrl = selectedRecordingId ? audioUrlFor(selectedRecordingId) : undefined;
-  const perturbedAudioUrl = perturbation
-    ? `${API_BASE}/tasks/task-b/perturbed/${encodeURIComponent(perturbation.perturbed.recording_id)}/audio`
+  // A preview and the run it precedes share one deterministic clip, so the
+  // player keeps its source when the run lands.
+  const perturbedId = perturbation?.perturbed.recording_id ?? preview?.perturbed_id;
+  const perturbedAudioUrl = perturbedId
+    ? `${API_BASE}/tasks/task-b/perturbed/${encodeURIComponent(perturbedId)}/audio`
     : undefined;
 
   return {
     // recordings + uploads
     recordings,
     uploads,
+    isLoadingRecordings,
     isUploading,
     upload,
     selectedRecordingId,
@@ -348,6 +438,10 @@ export function useDiarization(model: string) {
     result,
     projection,
     projectionError,
+    mapDims,
+    setMapDims,
+    projection3d,
+    projection3dError,
     isRunning,
     error,
     run,
@@ -368,6 +462,8 @@ export function useDiarization(model: string) {
     isPerturbing,
     perturbationError,
     runPerturbation,
+    isPreviewing,
+    previewPerturbation,
     // audio
     audioRef,
     perturbedAudioRef,

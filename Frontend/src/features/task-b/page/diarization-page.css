@@ -185,6 +185,31 @@
   50% { transform: scaleY(1); }
 }
 
+/* Similarity matrix: revealed by a diagonal wipe. The resting value shows the
+   whole matrix, so with animations off (reduced motion, or no @property
+   support) it is simply there. */
+@property --dz-wipe {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 150%;
+}
+.dz-wipe {
+  -webkit-mask-image: linear-gradient(135deg, #000 calc(var(--dz-wipe) - 20%), transparent var(--dz-wipe));
+  mask-image: linear-gradient(135deg, #000 calc(var(--dz-wipe) - 20%), transparent var(--dz-wipe));
+  animation: dz-wipe 1.2s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+@keyframes dz-wipe {
+  from { --dz-wipe: 0%; }
+  to { --dz-wipe: 150%; }
+}
+
+/* What-if: spans where the two runs disagree pulse softly. */
+.dz-diff-pulse { animation: dz-diff-pulse 2.4s ease-in-out infinite; }
+@keyframes dz-diff-pulse {
+  0%, 100% { filter: brightness(1); box-shadow: 0 0 0 0 transparent; }
+  50% { filter: brightness(1.25); box-shadow: 0 0 10px 0 var(--dz-warn); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dz-page *,
   .dz-page *::before,

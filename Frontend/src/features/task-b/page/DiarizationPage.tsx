@@ -1,17 +1,15 @@
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion, useScroll, useSpring } from "motion/react";
 import { ArrowDown, AudioWaveform, Ear, Layers, Scissors, Sparkles, Users, Zap } from "lucide-react";
 import type { TaskDefinition } from "@/tasks/types";
 import { DiarizationTimeline } from "../DiarizationTimeline";
-import { SimilarityMatrix } from "../SimilarityMatrix";
-import { PerturbationControls } from "../PerturbationControls";
-import { DeltaSummaryCard } from "../DeltaSummaryCard";
-import { StackedTimelines } from "../StackedTimelines";
 import { HeroConversation } from "./HeroConversation";
-import { MeetingLibrary, type MeetingThumbnail } from "./MeetingLibrary";
+import { MeetingLibrary } from "./MeetingLibrary";
 import { RunProgress } from "./RunProgress";
 import { SegmentMap } from "./SegmentMap";
+import { SimilarityView } from "./SimilarityView";
+import { WhatIf } from "./WhatIf";
 import { Disclosure, ErrorNote, PrimaryButton, SectionTitle } from "./ui";
 import { useDiarization } from "./useDiarization";
 import { DzThemeProvider, ThemeToggle, usePalette, type DzTheme } from "./theme";
@@ -21,6 +19,8 @@ const NAV = [
   { href: "#meetings", label: "Pick a meeting" },
   { href: "#results", label: "Results" },
   { href: "#map", label: "Segment map" },
+  { href: "#hesitate", label: "Hesitation" },
+  { href: "#what-if", label: "What if" },
 ];
 
 /**
@@ -28,8 +28,8 @@ const NAV = [
  * meeting library, then the results. Technical detail sits one click deeper,
  * in "Technical details" drawers.
  *
- * The results section still mounts the pre-redesign views unchanged; the
- * redesign replaces them step by step (guide Part D, Steps 7–10).
+ * The results section still mounts the pre-redesign speaker timeline until
+ * Step 7 replaces it (guide Part D).
  */
 export const DiarizationPage = ({ task }: { task: TaskDefinition }) => (
   <DzThemeProvider>{(theme) => <DiarizationPageContent task={task} theme={theme} />}</DzThemeProvider>
@@ -53,27 +53,6 @@ const DiarizationPageContent = ({ task, theme }: { task: TaskDefinition; theme: 
       document.body.style.background = previous;
     };
   }, [CANVAS]);
-
-  // Every meeting run on this page keeps its mini timeline on its card, per
-  // model — a thumbnail from one model must not appear under another.
-  const [thumbnails, setThumbnails] = useState<Map<string, MeetingThumbnail>>(() => new Map());
-  useEffect(() => {
-    const result = d.result;
-    if (!result) return;
-    setThumbnails((current) =>
-      new Map(current).set(`${result.model}|${result.recording_id}`, {
-        duration: result.duration,
-        speakers: result.speakers,
-        segments: result.segments,
-      }),
-    );
-  }, [d.result]);
-  const modelThumbnails = useMemo(() => {
-    const prefix = `${model}|`;
-    return new Map(
-      [...thumbnails].filter(([key]) => key.startsWith(prefix)).map(([key, value]) => [key.slice(prefix.length), value]),
-    );
-  }, [thumbnails, model]);
 
   const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 
@@ -159,7 +138,7 @@ const DiarizationPageContent = ({ task, theme }: { task: TaskDefinition; theme: 
               onUpload={d.upload}
               isUploading={d.isUploading}
               disabled={busy}
-              thumbnails={modelThumbnails}
+              isLoading={d.isLoadingRecordings}
             />
 
             <div className="flex flex-wrap items-center gap-3">
@@ -220,7 +199,7 @@ const DiarizationPageContent = ({ task, theme }: { task: TaskDefinition; theme: 
           </div>
         </section>
 
-        {/* Results: the pre-redesign views, mounted unchanged until Steps 7–10 replace them. */}
+        {/* Results. The speaker timeline is still the pre-redesign view until Step 7. */}
         <section id="results" className="mx-auto max-w-[1600px] scroll-mt-20 space-y-4 px-4 py-12 sm:px-6">
           {d.result ? (
             <>
@@ -253,6 +232,10 @@ const DiarizationPageContent = ({ task, theme }: { task: TaskDefinition; theme: 
                   result={d.result}
                   projection={d.projection}
                   projectionError={d.projectionError}
+                  dims={d.mapDims}
+                  onDimsChange={d.setMapDims}
+                  projection3d={d.projection3d}
+                  projection3dError={d.projection3dError}
                   isRunning={d.isRunning}
                   embeddingDimension={d.embeddingDimension}
                   selectedId={d.selectedId}
@@ -263,59 +246,54 @@ const DiarizationPageContent = ({ task, theme }: { task: TaskDefinition; theme: 
                 />
               </div>
 
-              <LegacyPanel title="Segment similarity matrix" light>
-                <SimilarityMatrix
-                  segments={d.result.segments}
-                  embeddings={d.result.embeddings}
-                  speakers={d.result.speakers}
+              {/* Step 4 */}
+              <div id="hesitate" className="scroll-mt-20 pt-8">
+                <SectionTitle
+                  eyebrow="Step 4 · Where did it hesitate?"
+                  title={<>Voices it could <span className="dz-accent-text">mix up</span></>}
+                >
+                  Every moment of speech compared with every other. Bright squares between different speakers are where
+                  the model had to make a close call.
+                </SectionTitle>
+                <SimilarityView
+                  result={d.result}
+                  selectedId={d.selectedId}
+                  onSelect={d.seekToSegment}
+                  onPlay={(id) => d.playPair(id, id)}
                   onPlayPair={d.playPair}
                 />
-              </LegacyPanel>
+              </div>
 
-              <LegacyPanel title="Perturbation counterfactual" light>
-                <div className="space-y-4">
-                  <PerturbationControls
-                    activeType={d.perturbationType}
-                    onActiveTypeChange={d.setPerturbationType}
-                    noisePercent={d.noisePercent}
-                    onNoisePercentChange={d.setNoisePercent}
-                    maskRange={d.maskRange}
-                    onMaskRangeChange={d.setMaskRange}
-                    onRun={d.runPerturbation}
-                    isRunning={d.isPerturbing}
-                    disabled={!d.selectedRecordingId || d.isRunning}
-                    disabledReason={d.isRunning ? "Waiting for the current diarization to finish." : null}
-                  />
-
-                  {d.perturbation && (
-                    <div className="space-y-4">
-                      <DeltaSummaryCard
-                        delta={d.perturbation.delta}
-                        perturbation={d.perturbation.perturbation}
-                        cached={d.perturbation.cached}
-                      />
-                      <StackedTimelines
-                        original={d.perturbation.original}
-                        perturbed={d.perturbation.perturbed}
-                        delta={d.perturbation.delta}
-                        hoveredId={d.hoveredId}
-                        selectedId={d.selectedId}
-                        onHover={d.setHoveredId}
-                        onSelectOriginal={d.seekToSegment}
-                        onSelectPerturbed={d.seekPerturbedSegment}
-                      />
-                      <div className="space-y-1">
-                        <div className="text-xs text-muted-foreground">
-                          Perturbed audio — listen to what the second run actually heard
-                        </div>
-                        <audio ref={d.perturbedAudioRef} controls className="w-full" src={d.perturbedAudioUrl} />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </LegacyPanel>
-
-              {d.perturbationError && <ErrorNote>{d.perturbationError}</ErrorNote>}
+              {/* Step 5 */}
+              <div id="what-if" className="scroll-mt-20 pt-8">
+                <SectionTitle
+                  eyebrow="Step 5 · What if the audio was worse?"
+                  title={<>Make it <span className="dz-accent-text">harder</span></>}
+                >
+                  Change the recording, run the same model again, and see how the answer moves.
+                </SectionTitle>
+                <WhatIf
+                  result={d.result}
+                  perturbationType={d.perturbationType}
+                  setPerturbationType={d.setPerturbationType}
+                  noisePercent={d.noisePercent}
+                  setNoisePercent={d.setNoisePercent}
+                  maskRange={d.maskRange}
+                  setMaskRange={d.setMaskRange}
+                  perturbation={d.perturbation}
+                  isPerturbing={d.isPerturbing}
+                  perturbationError={d.perturbationError}
+                  runPerturbation={d.runPerturbation}
+                  isPreviewing={d.isPreviewing}
+                  previewPerturbation={d.previewPerturbation}
+                  canRun={!!d.selectedRecordingId && !d.isRunning}
+                  selectedId={d.selectedId}
+                  onSelectOriginal={d.seekToSegment}
+                  onSelectPerturbed={d.seekPerturbedSegment}
+                  perturbedAudioRef={d.perturbedAudioRef}
+                  perturbedAudioUrl={d.perturbedAudioUrl}
+                />
+              </div>
             </>
           ) : (
             <p className="dz-card rounded-2xl p-6 text-center text-sm text-slate-400">

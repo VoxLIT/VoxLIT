@@ -9,7 +9,12 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { TaskDefinition } from "@/tasks/types";
 import { DiarizationPage } from "../page/DiarizationPage";
-import { projection, result } from "./fixtures";
+import { projection, projection3d, result } from "./fixtures";
+
+// jsdom has no WebGL; the page only needs to know the 3D map was handed its points.
+vi.mock("../page/SegmentMap3D", () => ({
+  default: ({ points }: { points: unknown[] }) => <div data-testid="segment-map-3d" data-count={points.length} />,
+}));
 
 // The shared registry imports every task's components (and Plotly with them),
 // which jsdom cannot load, so the page gets the task-b entry's shape here.
@@ -59,6 +64,9 @@ const routeFetch = (projectionReply: { ok: boolean; status: number; json: () => 
     "fetch",
     vi.fn(async (url: string) => {
       const reply = (ok: boolean, status: number, body: unknown) => ({ ok, status, json: async () => body });
+      if (url.includes("/tasks/task-b/projection") && url.includes("dims=3")) {
+        return reply(true, 200, projection3d);
+      }
       if (url.includes("/tasks/task-b/projection")) {
         return projectionReply;
       }
@@ -110,5 +118,20 @@ describe("DiarizationPage — projection failure", () => {
     routeFetch({ ok: true, status: 200, json: async () => projection });
     await runDemo();
     expect(await screen.findAllByTestId("map-point")).toHaveLength(projection.points.length);
+  });
+
+  it("fetches the 3D layout only when 3D is picked, then draws it", async () => {
+    routeFetch({ ok: true, status: 200, json: async () => projection });
+    await runDemo();
+    await screen.findAllByTestId("map-point");
+    const projectionCalls = () =>
+      vi.mocked(fetch).mock.calls.map(([url]) => String(url)).filter((url) => url.includes("/projection"));
+    expect(projectionCalls()).toEqual([expect.stringContaining("dims=2")]);
+
+    await userEvent.click(screen.getByRole("radio", { name: /3D/ }));
+
+    expect(await screen.findByTestId("segment-map-3d")).toHaveAttribute("data-count", String(projection3d.points.length));
+    expect(projectionCalls()).toHaveLength(2);
+    expect(projectionCalls()[1]).toContain("dims=3");
   });
 });

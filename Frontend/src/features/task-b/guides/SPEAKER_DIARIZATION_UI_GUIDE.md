@@ -289,10 +289,13 @@ Copy `deepfake/page/ui.tsx` and restyle it with `dz-` classes:
 
 ### Step 6: Step 1, pick a meeting (replace the `<select>`)
 
-`MeetingLibrary.tsx`: a **grid of cards**, no inner scroll.
+`MeetingLibrary.tsx`: **two columns of one fixed height** (`lg:h-[22rem]`).
+Left: a 2-up grid of meeting cards that scrolls inside that height. Right: the
+upload box, filling the height. They stack on narrow screens.
 
 ```tsx
-<motion.ul layout className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+<div className="grid gap-5 lg:h-[22rem] lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
+<motion.ul layout className="grid max-h-[22rem] content-start gap-3 overflow-y-auto p-1 sm:grid-cols-2 lg:h-full lg:max-h-none">
   {[...recordings, ...uploads].map((r, i) => (
     <motion.li layout key={r.recording_id}
       initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }}
@@ -300,14 +303,15 @@ Copy `deepfake/page/ui.tsx` and restyle it with `dz-` classes:
       {/* name (mono), size, "AMI meeting" or "Your upload" chip, ▶ preview, Select */}
     </motion.li>
   ))}
-  <li>{/* dashed "Upload your own" card: click or drag-drop; WAV/MP3/M4A/FLAC ≤ 50 MB */}</li>
+  {/* no recordings and no uploads: "Loading recordings…" until the listing returns, then "No recordings available" */}
 </motion.ul>
+<UploadCard /> {/* dashed "Upload your own" box: click or drag-drop; WAV/MP3/M4A/FLAC ≤ 50 MB */}
+</div>
 ```
 
 - The selected card gets an accent ring and grows slightly (`scale: 1.02`).
-- Once a meeting has been analysed, show a **mini timeline thumbnail**
-  (speaker-coloured bars) on its card. The grid then carries real colour.
-- The **"Find the speakers"** button sits under the grid.
+- Cards carry no speaker timeline; the analysed timeline lives in the steps below.
+- The **"Find the speakers"** button sits under the two columns.
 
 **Long runs (`RunProgress.tsx`).** The first run can take minutes, so
 never show just a spinner. Show three stages that light up in order, each
@@ -400,10 +404,11 @@ screens.
   speaker is the most interesting thing to show a user.
 - Hovering a point opens the same popup as the timeline, and **highlights
   that segment on the timeline** (shared `hoveredId`, which you already have).
-- The projection only returns 2D PCA today. For 3D or UMAP/t-SNE, ask the
-  backend owner to add `n_components` / `method` query params to
-  `GET /projection`. Until then, show only the 2D view and keep a
-  disabled "3D" pill with the tooltip "coming soon".
+- `GET /projection?dims=2|3` (default 2) returns PCA to 2D or 3D, with `z`
+  only on 3D points and `explained_variance` per axis. The 3D layout is
+  fetched the first time the 3D pill is picked (`useDiarization`: `mapDims`,
+  `projection3d`), from the same cached run — it never re-diarizes. The
+  Technical details disclosure reports how much variance the axes keep.
 - 3D (`SegmentMap3D.tsx`, lazy-loaded with `React.lazy`):
   - one `instancedMesh` for all points
   - an outline shell (a second instanced mesh, `BackSide`, canvas colour)
