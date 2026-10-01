@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { WaveformViewer } from "@/components/audio/WaveformViewer";
+import { InfoTooltip } from "./InfoTooltip";
 import {
   isFrequencySaliency,
   type AnySaliencyMapResponse,
@@ -69,6 +70,56 @@ const formatScore = (value: number) => value.toFixed(4);
 const formatSigned = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(4)}`;
 const formatTime = (seconds: number) => `${seconds.toFixed(2)}s`;
 const formatHzRange = (lowHz: number, highHz: number) => `${Math.round(lowHz)}–${Math.round(highHz)} Hz`;
+
+// Band changes are shown compactly; toFixed keeps the minus sign, so only "+" is added.
+const formatSignedShort = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(3)}`;
+
+/** Explains the baseline score that every occlusion bar is measured against. */
+const BaselineSimilarityCard = ({ result }: { result: AnySaliencyMapResponse }) => {
+  const isCluster = result.reference_type === "cluster";
+  const isAboveThreshold = result.baseline_similarity >= result.threshold;
+  return (
+    <div className="rounded-md border p-2.5" data-testid="baseline-similarity-card">
+      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        Baseline similarity
+        <InfoTooltip title="Baseline similarity">
+          <p>
+            The model turns each reference clip into a voice fingerprint and averages them into one
+            &apos;centroid&apos;. This number is the cosine similarity between this clip and that centroid.
+          </p>
+          <p>
+            It is usually higher than &apos;Avg. similarity to cluster&apos;, which averages one-by-one comparisons,
+            because averaging cancels out each clip&apos;s noise.
+          </p>
+          <p>Each bar below shows how much this number drops when that part is silenced.</p>
+        </InfoTooltip>
+      </div>
+      <div className="text-2xl font-semibold tabular-nums leading-tight">
+        {formatScore(result.baseline_similarity)}
+      </div>
+      {isCluster ? (
+        // No threshold comparison here: result.threshold is the
+        // pair-verification threshold, not the clustering threshold.
+        <p className="text-xs text-muted-foreground">
+          {result.reference_count === 1
+            ? "How similar this clip is to the other clip in this speaker group (this clip excluded)."
+            : `How similar this clip is to the average voice of the other ${result.reference_count} clips in this speaker group (this clip excluded).`}
+        </p>
+      ) : (
+        <>
+          <p className="text-xs text-muted-foreground">
+            How similar this clip is to the reference speaker&apos;s average voice, before anything is silenced.
+          </p>
+          <p className={`text-xs font-medium ${isAboveThreshold ? "text-emerald-700" : "text-rose-700"}`}>
+            {isAboveThreshold
+              ? `Above threshold ${result.threshold.toFixed(2)} → same speaker`
+              : `Below threshold ${result.threshold.toFixed(2)} → different speakers`}
+          </p>
+        </>
+      )}
+    </div>
+  );
+};
 
 export interface SpeakerSaliencyMapProps {
   title: string;
@@ -309,6 +360,7 @@ export const SpeakerSaliencyMap = ({
 
             {result && (
               <div className={staleReason ? "space-y-3 opacity-50 pointer-events-none" : "space-y-3"}>
+                <BaselineSimilarityCard result={result} />
                 <WaveformViewer
                   audioUrl={audioUrl}
                   requireCredentials={requireCredentials}
@@ -353,9 +405,7 @@ export const SpeakerSaliencyMap = ({
 
             {frequencyResult && (
               <div className={staleReason ? "space-y-2 opacity-50 pointer-events-none" : "space-y-2"}>
-                <div className="text-xs text-muted-foreground">
-                  Baseline similarity: {formatScore(frequencyResult.baseline_similarity)}
-                </div>
+                <BaselineSimilarityCard result={frequencyResult} />
                 <div className="space-y-1" data-testid="saliency-band-list">
                   {frequencyResult.bands.map((band) => {
                     const classification = classifySegment(band);
@@ -369,8 +419,8 @@ export const SpeakerSaliencyMap = ({
                         title={`Occluded similarity: ${formatScore(band.occluded_similarity)} · ${CLASSIFICATION_LABEL[classification]}`}
                       >
                         <div className="w-40 shrink-0">
-                          <div className="font-medium">{band.label}</div>
-                          <div className="text-[10px] text-muted-foreground">
+                          <div className="text-sm font-medium">{band.label}</div>
+                          <div className="text-xs text-muted-foreground">
                             {formatHzRange(band.low_hz, band.high_hz)}
                           </div>
                         </div>
@@ -385,8 +435,8 @@ export const SpeakerSaliencyMap = ({
                             }}
                           />
                         </div>
-                        <span className="w-16 shrink-0 text-right font-mono">
-                          {formatSigned(band.similarity_change)}
+                        <span className="w-16 shrink-0 text-right font-mono tabular-nums">
+                          {formatSignedShort(band.similarity_change)}
                         </span>
                       </div>
                     );

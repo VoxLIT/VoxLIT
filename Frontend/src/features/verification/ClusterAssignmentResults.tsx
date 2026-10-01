@@ -1,9 +1,10 @@
 import { useSyncExternalStore } from "react";
-import { HelpCircle, Target } from "lucide-react";
+import { Target } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import type { PredictionResultsProps } from "@/tasks/types";
+import { InfoTooltip } from "./InfoTooltip";
 import { clusterAssignmentStore } from "./clusterAssignmentStore";
 import { formatClusterLabel } from "./formatSpeakerLabel";
 
@@ -74,14 +75,9 @@ export const ClusterAssignmentResults = ({ selectedFile }: PredictionResultsProp
 
           <span className="flex items-center gap-1 text-muted-foreground">
             Avg. similarity to cluster
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
-              </TooltipTrigger>
-              <TooltipContent className="text-xs space-y-1">
-                <p>The mean similarity between this recording and every other member of its cluster.</p>
-              </TooltipContent>
-            </Tooltip>
+            <InfoTooltip title="Average similarity to cluster">
+              <p>The average of this recording&apos;s similarity to each other recording in its cluster.</p>
+            </InfoTooltip>
           </span>
           <span>
             {stats.mean_similarity_to_cluster === null
@@ -91,14 +87,9 @@ export const ClusterAssignmentResults = ({ selectedFile }: PredictionResultsProp
 
           <span className="flex items-center gap-1 text-muted-foreground">
             Min intra-cluster similarity
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
-              </TooltipTrigger>
-              <TooltipContent className="text-xs space-y-1">
-                <p>The weakest similarity between this recording and any other member of its cluster.</p>
-              </TooltipContent>
-            </Tooltip>
+            <InfoTooltip title="Lowest similarity in cluster">
+              <p>The weakest similarity between this recording and any other recording in its cluster.</p>
+            </InfoTooltip>
           </span>
           <span>
             {stats.min_similarity_to_cluster === null
@@ -116,14 +107,12 @@ export const ClusterAssignmentResults = ({ selectedFile }: PredictionResultsProp
 
           <span className="flex items-center gap-1 text-muted-foreground">
             Nearest-neighbour similarity
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
-              </TooltipTrigger>
-              <TooltipContent className="text-xs space-y-1">
-                <p>The similarity to the single most similar recording in the whole batch, whether or not it's in the same cluster.</p>
-              </TooltipContent>
-            </Tooltip>
+            <InfoTooltip title="Closest match in the batch">
+              <p>
+                The similarity to the single most similar recording in the whole batch, whether or not it is in the
+                same cluster.
+              </p>
+            </InfoTooltip>
           </span>
           <span>{formatScore(stats.nearest_similarity)}</span>
 
@@ -132,15 +121,13 @@ export const ClusterAssignmentResults = ({ selectedFile }: PredictionResultsProp
 
           <span className="flex items-center gap-1 text-muted-foreground">
             Clustering distance threshold
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
-              </TooltipTrigger>
-              <TooltipContent className="text-xs space-y-1">
-                <p>The distance threshold used to decide when recordings join the same cluster.</p>
-                <p>Separately calibrated from the pair-verification threshold — it governs clustering only, not the same/different-speaker call for a pair.</p>
-              </TooltipContent>
-            </Tooltip>
+            <InfoTooltip title="Clustering distance threshold">
+              <p>The distance cutoff that decides when recordings join the same cluster.</p>
+              <p>
+                It is set separately from the pair-verification threshold. It controls clustering only, not the
+                same/different-speaker call for a pair.
+              </p>
+            </InfoTooltip>
           </span>
           <span>{formatScore(clusteringDistanceThreshold)}</span>
         </CardContent>

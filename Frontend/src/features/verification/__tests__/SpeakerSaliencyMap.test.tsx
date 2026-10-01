@@ -322,6 +322,91 @@ describe("SpeakerSaliencyMap", () => {
       expect(parseFloat(bar(4).style.width)).toBeCloseTo(20, 5);
     });
 
+    it("shows band changes with an explicit sign and three decimals", () => {
+      renderMap({ occlusionAxis: "frequency", result: frequencyResult });
+
+      const list = screen.getByTestId("saliency-band-list");
+      expect(list).toHaveTextContent("+0.150");
+      expect(list).toHaveTextContent("-0.050");
+    });
+
+    describe("baseline similarity card", () => {
+      const clusterSummary =
+        "How similar this clip is to the average voice of the other 2 clips in this speaker group (this clip excluded).";
+      const enrollmentSummary =
+        "How similar this clip is to the reference speaker's average voice, before anything is silenced.";
+      const timeResult: SaliencyMapResponse = {
+        model: "ecapa-tdnn",
+        model_label: "ECAPA-TDNN",
+        reference_type: "enrollment",
+        cluster_id: null,
+        target_recording_id: null,
+        reference_count: 3,
+        baseline_similarity: 0.85,
+        threshold: 0.36,
+        segment_count: 1,
+        audio_duration_seconds: 1.0,
+        interpretation: "irrelevant for this test",
+        segments: [
+          {
+            segment_index: 1,
+            start_seconds: 0,
+            end_seconds: 1,
+            occluded_similarity: 0.8,
+            similarity_change: 0.05,
+            influence_strength: 0.05,
+          },
+        ],
+      };
+
+      it("cluster mode: describes the group and never compares against the pair threshold", () => {
+        renderMap({ occlusionAxis: "frequency", result: frequencyResult });
+
+        const card = screen.getByTestId("baseline-similarity-card");
+        expect(card).toHaveTextContent("Baseline similarity");
+        expect(card).toHaveTextContent("0.8500");
+        expect(card).toHaveTextContent(clusterSummary);
+        expect(card).not.toHaveTextContent(/threshold/i);
+        expect(card).not.toHaveTextContent(enrollmentSummary);
+      });
+
+      it("enrollment mode: shows the summary and an above-threshold verdict (time view)", () => {
+        renderMap({ result: timeResult });
+
+        const card = screen.getByTestId("baseline-similarity-card");
+        expect(card).toHaveTextContent("0.8500");
+        expect(card).toHaveTextContent(enrollmentSummary);
+        expect(card).toHaveTextContent("Above threshold 0.36 → same speaker");
+        expect(card).not.toHaveTextContent("speaker group");
+      });
+
+      it("enrollment mode: shows a below-threshold verdict (frequency view)", () => {
+        renderMap({
+          occlusionAxis: "frequency",
+          result: { ...frequencyResult, reference_type: "enrollment", cluster_id: null, baseline_similarity: 0.2 },
+        });
+
+        const card = screen.getByTestId("baseline-similarity-card");
+        expect(card).toHaveTextContent("0.2000");
+        expect(card).toHaveTextContent(enrollmentSummary);
+        expect(card).toHaveTextContent("Below threshold 0.36 → different speakers");
+      });
+
+      it("explains the number in its tooltip", async () => {
+        renderMap({ occlusionAxis: "frequency", result: frequencyResult });
+
+        fireEvent.focus(screen.getByLabelText("About Baseline similarity"));
+
+        const tooltip = await screen.findByRole("tooltip");
+        expect(tooltip).toHaveTextContent(
+          "The model turns each reference clip into a voice fingerprint and averages them into one 'centroid'. This number is the cosine similarity between this clip and that centroid."
+        );
+        expect(tooltip).toHaveTextContent(
+          "Each bar below shows how much this number drops when that part is silenced."
+        );
+      });
+    });
+
     it("does not render a time result in the frequency view or vice versa", () => {
       const { rerender } = renderMap({ occlusionAxis: "frequency", result: mockSaliencyResult });
       expect(screen.queryByTestId("mock-waveform-viewer")).not.toBeInTheDocument();

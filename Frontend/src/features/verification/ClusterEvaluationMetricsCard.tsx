@@ -1,6 +1,7 @@
-import { HelpCircle, Target } from "lucide-react";
+import { Target } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { InfoTooltip } from "./InfoTooltip";
 import type { EvaluationMetrics } from "./batchTypes";
 
 interface ClusterEvaluationMetricsCardProps {
@@ -39,16 +40,20 @@ export const ClusterEvaluationMetricsCard = ({
               <div className="space-y-1">
                 <span className="flex items-center gap-1 font-medium">
                   Partition agreement
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
-                    </TooltipTrigger>
-                    <TooltipContent className="text-xs space-y-1">
-                      <p>ARI: how well the predicted clusters match the true speaker groups, corrected for chance. 1.0 is a perfect match; 0 is no better than random.</p>
-                      <p>NMI: how much information the predicted clusters and true groups share, on a 0-1 scale. Higher is a closer match.</p>
-                      <p>Purity: the share of recordings in each predicted cluster that belong to that cluster&apos;s most common true speaker. 0-1, higher is better.</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  <InfoTooltip title="Partition agreement">
+                    <p>
+                      ARI (Adjusted Rand Index): how well the predicted clusters match the true speaker groups,
+                      corrected for chance. 1.0 is a perfect match; 0 is no better than random.
+                    </p>
+                    <p>
+                      NMI (Normalized Mutual Information): how much the predicted clusters and true groups tell you
+                      about each other, from 0 to 1. Higher is a closer match.
+                    </p>
+                    <p>
+                      Purity: the share of recordings in each predicted cluster that belong to that cluster&apos;s most
+                      common true speaker, from 0 to 1. Higher is better.
+                    </p>
+                  </InfoTooltip>
                 </span>
                 <div className="grid grid-cols-3 gap-1 text-muted-foreground">
                   <span>ARI: {formatScore(evaluationMetrics.adjusted_rand_index)}</span>
@@ -60,15 +65,20 @@ export const ClusterEvaluationMetricsCard = ({
               <div className="space-y-1">
                 <span className="flex items-center gap-1 font-medium">
                   Pairwise rates
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
-                    </TooltipTrigger>
-                    <TooltipContent className="text-xs space-y-1">
-                      <p>Treats every pair of recordings as a same-speaker/different-speaker call and compares it to the true grouping.</p>
-                      <p>Precision: of pairs predicted same-speaker, the share that truly were. Recall: of truly same-speaker pairs, the share caught. F1 balances the two. Accuracy: overall share of pairs called correctly. All 0-1, higher is better.</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  <InfoTooltip title="Pairwise rates">
+                    <p>
+                      Every pair of recordings is treated as a same-speaker or different-speaker call and compared to
+                      the true grouping.
+                    </p>
+                    <p>
+                      Precision: of the pairs predicted same-speaker, the share that truly were. Recall: of the truly
+                      same-speaker pairs, the share that were caught.
+                    </p>
+                    <p>
+                      F1 balances precision and recall. Accuracy is the overall share of pairs called correctly. All
+                      run from 0 to 1; higher is better.
+                    </p>
+                  </InfoTooltip>
                 </span>
                 <div className="grid grid-cols-2 gap-1 text-muted-foreground">
                   <span>Precision: {formatScore(evaluationMetrics.pairwise_precision)}</span>
@@ -81,15 +91,16 @@ export const ClusterEvaluationMetricsCard = ({
               <div className="space-y-1">
                 <span className="flex items-center gap-1 font-medium">
                   Pair counts
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
-                    </TooltipTrigger>
-                    <TooltipContent className="text-xs space-y-1">
-                      <p>How many of the batch&apos;s recording pairs fall into each outcome when the predicted clusters are compared to the true speaker groups.</p>
-                      <p>True positive/negative: predicted and true grouping agree. False positive/negative: they disagree.</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  <InfoTooltip title="Pair counts">
+                    <p>
+                      How many of the batch&apos;s recording pairs fall into each outcome when the predicted clusters are
+                      compared to the true speaker groups.
+                    </p>
+                    <p>
+                      True positive/negative: the predicted and true grouping agree. False positive/negative: they
+                      disagree.
+                    </p>
+                  </InfoTooltip>
                 </span>
                 <div className="grid grid-cols-3 gap-1 text-muted-foreground">
                   <span>Total: {formatCount(evaluationMetrics.total_unique_pairs)}</span>
@@ -103,15 +114,16 @@ export const ClusterEvaluationMetricsCard = ({
               <div className="space-y-1">
                 <span className="flex items-center gap-1 font-medium">
                   Speaker count
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
-                    </TooltipTrigger>
-                    <TooltipContent className="text-xs space-y-1">
-                      <p>True speaker groups: the number of distinct speakers known from ground truth. Predicted clusters: the number clustering produced.</p>
-                      <p>A mismatch means clustering split a speaker across multiple clusters, or merged different speakers into one.</p>
-                    </TooltipContent>
-                  </Tooltip>
+                  <InfoTooltip title="Speaker count">
+                    <p>
+                      True speaker groups: the number of distinct speakers known from the ground truth (the known
+                      correct grouping). Predicted clusters: the number clustering produced.
+                    </p>
+                    <p>
+                      A mismatch means clustering split one speaker across several clusters, or merged different
+                      speakers into one.
+                    </p>
+                  </InfoTooltip>
                 </span>
                 <div className="grid grid-cols-2 gap-1 text-muted-foreground">
                   <span>True speaker groups: {trueSpeakerCount ?? "Not available"}</span>
