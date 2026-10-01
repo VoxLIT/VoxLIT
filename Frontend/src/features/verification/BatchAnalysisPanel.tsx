@@ -9,6 +9,7 @@ import { VERIFICATION_DEMO_DATASET_ID } from "@/tasks/registry";
 import type { UploadedFile, DatasetRecordingRef } from "@/tasks/types";
 import { ClusterSummaryList } from "./ClusterSummaryList";
 import { PairComparisonCard } from "./PairComparisonCard";
+import { ThresholdExplorerCard } from "./ThresholdExplorerCard";
 import { buildClusterColorMap } from "./clusterColors";
 import { clusterAssignmentStore } from "./clusterAssignmentStore";
 import { formatClusterLabel } from "./formatSpeakerLabel";
@@ -466,6 +467,7 @@ export const BatchAnalysisPanel = ({
             onClusterFocusChange={setFocusedClusterId}
             resolveLabel={resolveRecordingLabel}
           />
+          <ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveRecordingLabel} />
         </>
       )}
     </div>
