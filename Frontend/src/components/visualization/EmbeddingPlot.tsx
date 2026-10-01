@@ -688,12 +688,8 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
       z: z && z.length > 0 ? [Math.min(...z) * 1.1, Math.max(...z) * 1.1] as [number, number] : [0, 0] as [number, number]
     } : { x: [0, 0] as [number, number], y: [0, 0] as [number, number], z: [0, 0] as [number, number] };
 
-    const hasActivePair = (externalSelectedLabels?.length ?? 0) > 0;
     const isPointSelected = (label: string, index?: number): boolean => {
       if (isExternal) {
-        if (hasActivePair) {
-          return externalSelectedLabels!.includes(label);
-        }
         const ext = index !== undefined && externalData ? externalData[index] : undefined;
         return (
           matchesSelectedFile(label, selectedFile) ||
@@ -733,7 +729,7 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
 
     // Create marker opacities based on selection (selected point is 1.0, unselected points dimmed to 0.7 so selected is brighter)
     const hasSelection = isExternal
-      ? ((externalSelectedLabels?.length ?? 0) > 0 || !!selectedFile)
+      ? !!selectedFile
       : (!!selectedFile || selectedByAngle.length > 0);
     const markerOpacities = text.map((filename, index) => {
       if (isPointSelected(filename, index)) return 1.0;
@@ -833,30 +829,6 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
 
     result.push(originTrace);
 
-    // Connect the two externally-selected points (pair comparison). No customdata is set,
-    // so this trace is excluded from click/box-select and from the plane/angle point source.
-    if (isExternal && externalData && externalSelectedLabels?.length === 2) {
-      const [labelA, labelB] = externalSelectedLabels;
-      const pointA = externalData.find(point => point.label === labelA);
-      const pointB = externalData.find(point => point.label === labelB);
-      if (pointA && pointB) {
-        const connectorTrace: any = {
-          x: [pointA.coordinates[0], pointB.coordinates[0]],
-          y: [pointA.coordinates[1], pointB.coordinates[1]],
-          mode: 'lines',
-          type: is3D ? 'scatter3d' : 'scatter',
-          line: { color: '#6b7280', width: 2, dash: 'dot' },
-          hoverinfo: 'skip',
-          showlegend: false,
-          name: 'Pair connector',
-        };
-        if (is3D) {
-          connectorTrace.z = [pointA.coordinates[2], pointB.coordinates[2]];
-        }
-        result.push(connectorTrace);
-      }
-    }
-
     // Add plane if selected and in 3D mode
     if (is3D && selectedPlane !== 'none') {
       const planeTrace = createPlane(selectedPlane, bounds);
@@ -868,7 +840,7 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
     // In 3D, scatter3d requires scalar marker.line.width, so render a dedicated highlight trace for selected points
     if (is3D) {
       const selectedIndices = text
-        .map((filename, index) => (isPointSelected(filename) ? index : -1))
+        .map((filename, index) => (isPointSelected(filename, index) ? index : -1))
         .filter(idx => idx !== -1);
 
       if (selectedIndices.length > 0) {
@@ -899,10 +871,10 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
 
     return result;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isExternal, externalData, externalSelectedLabels, embeddingData, is3D, selectedFile, selectedByAngle, selectedPlane, angleMin, angleMax]);
+  }, [isExternal, externalData, embeddingData, is3D, selectedFile, selectedByAngle, selectedPlane, angleMin, angleMax]);
 
   // The main scatter/scatter3d trace is always pushed first in the traces
-  // useMemo above, unconditionally, before the origin/connector/plane
+  // useMemo above, unconditionally, before the origin/plane
   // traces (which are only sometimes present) -- so it is always index 0.
   const MAIN_TRACE_INDEX = 0;
 
@@ -911,19 +883,17 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
   // changes `traces`' own output reference -- applied imperatively via
   // Plotly.restyle() below instead of by feeding a new `data` prop into
   // <Plot>. Priority matches the pre-existing selection rule: an
-  // individually/pair-selected point retains its cluster color with bold outline
+  // individually selected point retains its cluster color with bold outline
   // and full visibility; the focused cluster's own points keep their normal color;
   // every other cluster's points are lightened toward white. Index-aligned with
   // `externalData` directly (not `text`/`getPlotData()`), since the main
   // trace's point order for isExternal is exactly `externalData`'s order.
   const focusStyles = useMemo(() => {
     if (!isExternal || !externalData) return null;
-    const hasActivePair = (externalSelectedLabels?.length ?? 0) > 0;
-    const hasSelection = hasActivePair || !!selectedFile;
+    const hasSelection = !!selectedFile;
     const colors = externalData.map((point) => {
-      const isSelected = hasActivePair
-        ? (externalSelectedLabels?.includes(point.label) ?? false)
-        : matchesSelectedFile(point.label, selectedFile);
+      const isSelected = matchesSelectedFile(point.label, selectedFile) ||
+        (point.displayLabel ? matchesSelectedFile(point.displayLabel, selectedFile) : false);
       if (isSelected) return point.color;
       if (focusedClusterId && point.clusterId !== focusedClusterId) {
         return mixWithWhite(point.color, 0.7);
@@ -931,15 +901,14 @@ const EmbeddingPlotContent = ({ selectedMethod, is3D, onPointSelect, onAngleRang
       return point.color;
     });
     const opacities = externalData.map((point) => {
-      const isSelected = hasActivePair
-        ? (externalSelectedLabels?.includes(point.label) ?? false)
-        : matchesSelectedFile(point.label, selectedFile);
+      const isSelected = matchesSelectedFile(point.label, selectedFile) ||
+        (point.displayLabel ? matchesSelectedFile(point.displayLabel, selectedFile) : false);
       if (isSelected) return 1.0;
       if (focusedClusterId && point.clusterId !== focusedClusterId) return 0.55;
       return hasSelection ? 0.7 : 0.85;
     });
     return { colors, opacities };
-  }, [isExternal, externalData, externalSelectedLabels, selectedFile, focusedClusterId]);
+  }, [isExternal, externalData, selectedFile, focusedClusterId]);
 
   // Always mirrors the latest focusStyles into a ref, read by the stable
   // (never-recreated) applyFocusStyles callback below -- assigned directly
