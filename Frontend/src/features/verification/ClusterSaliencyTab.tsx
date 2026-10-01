@@ -115,6 +115,8 @@ export const ClusterSaliencyTab = ({
     if (requestAxis === "frequency") {
       formData.append("occlusion_axis", "frequency");
       formData.append("band_count", String(DEFAULT_SALIENCY_BAND_COUNT));
+    } else if (requestAxis === "integrated_gradients") {
+      formData.append("saliency_method", "integrated_gradients");
     }
 
     setIsSaliencyLoading(true);

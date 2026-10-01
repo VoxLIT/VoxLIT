@@ -174,6 +174,30 @@ class _ECAPAAdapter(_BaseAdapter):
             )
         return self.validate_embedding(embedding)
 
+    # Gradient path for Integrated Gradients. `extract_embedding` above is
+    # untouched; these two reproduce `encode_batch` split at the features.
+
+    # SpeechBrain Fbank defaults: f_min=0, f_max=sample_rate / 2.
+    feature_hz_range = (0.0, 8000.0)
+
+    def features(self, waveform: torch.Tensor) -> torch.Tensor:
+        """Log-mel filterbank [time, mel] of a mono 16 kHz waveform [1, samples]."""
+
+        with torch.no_grad():
+            features = self.model.mods.compute_features(waveform.to(self.device).float())
+        return features.squeeze(0)
+
+    def embed_from_features(self, features: torch.Tensor) -> torch.Tensor:
+        """Unnormalized embedding(s) from [time, mel] or [batch, time, mel]
+        features, with gradients enabled and the model still in eval mode."""
+
+        batch = features.unsqueeze(0) if features.dim() == 2 else features
+        relative_lengths = torch.ones(batch.shape[0], device=batch.device)
+        normalized = self.model.mods.mean_var_norm(batch, relative_lengths)
+        embeddings = self.model.mods.embedding_model(normalized, relative_lengths)
+        embeddings = embeddings.reshape(batch.shape[0], -1)
+        return embeddings[0] if features.dim() == 2 else embeddings
+
 
 @contextlib.contextmanager
 def _shield_speechbrain_lazy_modules():
@@ -250,6 +274,34 @@ class _WeSpeakerAdapter(_BaseAdapter):
                 {"waveform": waveform, "sample_rate": self.target_sample_rate}
             )
         return self.validate_embedding(np.asarray(embedding, dtype=np.float32))
+
+    # Gradient path for Integrated Gradients. `extract_embedding` above is
+    # untouched; these two reproduce the model's forward (kaldi fbank ->
+    # whole-clip centering -> ResNet) split at the uncentered fbank.
+
+    # torchaudio.compliance.kaldi.fbank defaults: low_freq=20, high_freq=Nyquist.
+    feature_hz_range = (20.0, 8000.0)
+
+    def features(self, waveform: torch.Tensor) -> torch.Tensor:
+        """Log-mel filterbank [time, mel] of a mono 16 kHz waveform [1, samples]."""
+
+        model = self.inference.model
+        if model.hparams.fbank_centering_span is not None:
+            raise ValueError("Integrated Gradients does not support running fbank centering.")
+        with torch.no_grad():
+            # Same scaling as `compute_fbank`, stopping before its centering.
+            scaled = waveform.to(self.device).float() * (1 << 15)
+            features = torch.vmap(model._fbank)(scaled.unsqueeze(0))
+        return features.squeeze(0)
+
+    def embed_from_features(self, features: torch.Tensor) -> torch.Tensor:
+        """Unnormalized embedding(s) from [time, mel] or [batch, time, mel]
+        features, with gradients enabled and the model still in eval mode."""
+
+        batch = features.unsqueeze(0) if features.dim() == 2 else features
+        centered = batch - batch.mean(dim=1, keepdim=True)
+        embeddings = self.inference.model.resnet(centered)[1]
+        return embeddings[0] if features.dim() == 2 else embeddings
 
 
 _MODEL_CACHE: dict[str, SpeakerEmbeddingAdapter] = {}
@@ -641,8 +693,10 @@ def _mel_to_hz(mel: float) -> float:
 
 
 def _mel_band_edges(band_count: int, sample_rate: int) -> list[float]:
-    """`band_count + 1` band edges in Hz, evenly spaced on the mel scale from
-    50 Hz to min(8000, sample_rate / 2)."""
+    """`band_count + 1` band edges in Hz, evenly spaced on the mel scale (HTK
+    mel formula, 2595 * log10(1 + hz / 700)) from 50 Hz to
+    min(8000 Hz, Nyquist). No perceptual or phonetic meaning is assigned to
+    a band."""
 
     upper_hz = min(BAND_OCCLUSION_MAX_HZ, sample_rate / 2)
     if upper_hz <= BAND_OCCLUSION_MIN_HZ:
@@ -655,20 +709,12 @@ def _mel_band_edges(band_count: int, sample_rate: int) -> list[float]:
     return edges
 
 
-def _band_label(centre_hz: float) -> str:
-    """Friendly hint for a band from its centre frequency. These are rough
-    listening hints for the UI, not scientific claims about what the model
-    uses."""
+def _band_label(band_index: int) -> str:
+    """Neutral label for the 1-based `band_index`. Bands are mel-spaced (HTK
+    mel formula) from 50 Hz to min(8000 Hz, Nyquist); no perceptual or
+    phonetic meaning is assigned to a band."""
 
-    if centre_hz < 300:
-        return "Pitch"
-    if centre_hz < 1000:
-        return "Vowel body"
-    if centre_hz < 2500:
-        return "Vowel shape"
-    if centre_hz <= 4000:
-        return "Voice clarity"
-    return "Hiss sounds (s/sh)"
+    return f"Band {band_index}"
 
 
 def _band_stft_size(sample_rate: int) -> int:
@@ -716,14 +762,12 @@ def _occlude_bands_and_score(
     """Silence each frequency band of target_path once, scoring against a
     fixed centroid. Returns (baseline_similarity, audio_duration_seconds, bands).
 
-    Bands are mel-spaced from 50 Hz to min(8000, sample_rate / 2). Content
-    above 8 kHz (and below 50 Hz) is never silenced and is left untouched.
-    Deterministic: no randomness anywhere.
+    Bands are mel-spaced (HTK mel formula) from 50 Hz to
+    min(8000 Hz, Nyquist). Content above 8 kHz (and below 50 Hz) is never
+    silenced and is left untouched. Deterministic: no randomness anywhere.
 
-    Each band carries a friendly `label` from its centre frequency -- <300 Hz
-    "Pitch", 300-1000 "Vowel body", 1000-2500 "Vowel shape", 2500-4000
-    "Voice clarity", >4000 "Hiss sounds (s/sh)". These are hints for readers,
-    not scientific claims.
+    Each band carries a neutral `label`, "Band {index}" (1-based). No
+    perceptual or phonetic meaning is assigned to a band.
 
     No reference-count or band-count constraints here -- callers own those."""
 
@@ -759,7 +803,7 @@ def _occlude_bands_and_score(
                     "band_index": index + 1,
                     "low_hz": low_hz,
                     "high_hz": high_hz,
-                    "label": _band_label((low_hz + high_hz) / 2),
+                    "label": _band_label(index + 1),
                     "occluded_similarity": occluded_similarity,
                     "similarity_change": similarity_change,
                     "influence_strength": abs(similarity_change),
@@ -767,6 +811,152 @@ def _occlude_bands_and_score(
             )
 
     return baseline_similarity, audio_duration_seconds, bands
+
+
+IG_MAX_TIME_COLUMNS = 120
+IG_MAX_MEL_ROWS = 40
+IG_BAND_COUNT = 8
+IG_INTERNAL_BATCH_SIZE = 8
+
+
+def _feature_mel_bin_edges(mel_count: int, low_hz: float, high_hz: float) -> list[float]:
+    """`mel_count + 1` nominal edges in Hz for a triangular mel filterbank
+    spanning low_hz..high_hz: each bin is given the mel-width step centred on
+    its filter peak."""
+
+    low_mel, high_mel = _hz_to_mel(low_hz), _hz_to_mel(high_hz)
+    step = (high_mel - low_mel) / (mel_count + 1)
+    return [_mel_to_hz(low_mel + (index + 0.5) * step) for index in range(mel_count + 1)]
+
+
+def _sum_pool(values: np.ndarray, axis: int, max_size: int) -> tuple[np.ndarray, np.ndarray]:
+    """Sum-pool `values` along `axis` down to at most `max_size` groups,
+    keeping sign and the grand total. Returns (pooled, group boundaries)."""
+
+    size = values.shape[axis]
+    boundaries = np.linspace(0, size, min(size, max_size) + 1, dtype=int)
+    return np.add.reduceat(values, boundaries[:-1], axis=axis), boundaries
+
+
+def integrated_gradients_saliency(
+    adapter: SpeakerEmbeddingAdapter,
+    centroid: torch.Tensor,
+    target_path: str | Path,
+    n_steps: int = 32,
+) -> dict[str, object]:
+    """Integrated Gradients attribution of the target's cosine similarity to
+    a fixed centroid over the model's log-mel input features [time, mel].
+
+    The path runs from the features of an all-silent waveform of the same
+    length to the clip's own features, so the attributions sum (up to the
+    integration error, `convergence_delta`) to
+    `baseline_similarity - baseline_input_similarity`.
+
+    The grid is sum-pooled to at most 120 time columns x 40 mel rows and
+    returned as rows of mel (low to high), each a list over time. Band totals
+    use the same mel bands as frequency occlusion (`_mel_band_edges`), with
+    the same neutral "Band {index}" labels; feature bins centred outside
+    50 Hz-8 kHz are reported in `outside_bands_total`.
+    """
+
+    if not 4 <= n_steps <= 256:
+        raise ValueError("Integrated Gradients requires between 4 and 256 steps.")
+    if not (hasattr(adapter, "features") and hasattr(adapter, "embed_from_features")):
+        raise ValueError(
+            "Integrated Gradients is only available for models with a "
+            "differentiable feature path (ECAPA-TDNN and ResNet34-LM)."
+        )
+
+    # Imported lazily: captum is only needed once IG is actually requested.
+    from captum.attr import IntegratedGradients
+
+    waveform = adapter.load_audio(target_path)
+    sample_rate = adapter.target_sample_rate
+    audio_duration_seconds = waveform.shape[-1] / sample_rate
+
+    features = adapter.features(waveform).detach()
+    silent_features = adapter.features(torch.zeros_like(waveform)).detach()
+    if features.dim() != 2 or features.shape[0] == 0:
+        raise ValueError("Target audio is too short for Integrated Gradients.")
+    target_centroid = centroid.to(features.device)
+
+    def similarity_to_centroid(batch: torch.Tensor) -> torch.Tensor:
+        embeddings = F.normalize(adapter.embed_from_features(batch), p=2, dim=1)
+        return F.cosine_similarity(embeddings, target_centroid.unsqueeze(0), dim=1)
+
+    with torch.no_grad():
+        baseline_similarity = float(similarity_to_centroid(features.unsqueeze(0)).item())
+        baseline_input_similarity = float(
+            similarity_to_centroid(silent_features.unsqueeze(0)).item()
+        )
+
+    attributions, convergence_delta = IntegratedGradients(similarity_to_centroid).attribute(
+        features.unsqueeze(0),
+        baselines=silent_features.unsqueeze(0),
+        n_steps=n_steps,
+        internal_batch_size=IG_INTERNAL_BATCH_SIZE,
+        return_convergence_delta=True,
+    )
+    grid = attributions[0].detach().cpu().numpy().astype(np.float64)  # [time, mel]
+    if not np.isfinite(grid).all():
+        raise ValueError("Integrated Gradients produced non-finite attributions.")
+    frame_count, mel_count = grid.shape
+
+    total_attribution = float(grid.sum())
+    expected_total = baseline_similarity - baseline_input_similarity
+    delta = float(convergence_delta.reshape(-1)[0].item())
+    completeness_ok = abs(delta) <= max(0.05 * abs(expected_total), 0.01)
+
+    low_hz, high_hz = adapter.feature_hz_range
+    bin_edges_hz = _feature_mel_bin_edges(mel_count, low_hz, high_hz)
+    bin_centres_hz = [
+        _mel_to_hz((_hz_to_mel(low) + _hz_to_mel(high)) / 2)
+        for low, high in zip(bin_edges_hz[:-1], bin_edges_hz[1:])
+    ]
+
+    per_mel_totals = grid.sum(axis=0)
+    band_edges = _mel_band_edges(IG_BAND_COUNT, sample_rate)
+    bands: list[dict[str, float | int | str]] = []
+    for index in range(IG_BAND_COUNT):
+        band_low, band_high = band_edges[index], band_edges[index + 1]
+        is_last = index == IG_BAND_COUNT - 1
+        band_total = sum(
+            float(per_mel_totals[mel_index])
+            for mel_index, centre in enumerate(bin_centres_hz)
+            if band_low <= centre and (centre <= band_high if is_last else centre < band_high)
+        )
+        bands.append(
+            {
+                "band_index": index + 1,
+                "low_hz": band_low,
+                "high_hz": band_high,
+                "label": _band_label(index + 1),
+                "total_attribution": band_total,
+            }
+        )
+    outside_bands_total = total_attribution - sum(band["total_attribution"] for band in bands)
+
+    pooled, time_boundaries = _sum_pool(grid, 0, IG_MAX_TIME_COLUMNS)
+    pooled, mel_boundaries = _sum_pool(pooled, 1, IG_MAX_MEL_ROWS)
+
+    return {
+        "baseline_similarity": baseline_similarity,
+        "baseline_input_similarity": baseline_input_similarity,
+        "audio_duration_seconds": audio_duration_seconds,
+        "n_steps": n_steps,
+        "attributions": pooled.T.tolist(),
+        "time_edges_seconds": [
+            float(boundary) / frame_count * audio_duration_seconds for boundary in time_boundaries
+        ],
+        "mel_edges_hz": [bin_edges_hz[int(boundary)] for boundary in mel_boundaries],
+        "time_totals": pooled.sum(axis=1).tolist(),
+        "bands": bands,
+        "outside_bands_total": outside_bands_total,
+        "convergence_delta": delta,
+        "total_attribution": total_attribution,
+        "expected_total": expected_total,
+        "completeness_ok": completeness_ok,
+    }
 
 
 def temporal_occlusion_saliency(
@@ -830,6 +1020,7 @@ def compute_saliency_map(
     segment_count: int = 8,
     occlusion_axis: str = "time",
     band_count: int = 8,
+    saliency_method: str = "occlusion",
 ) -> dict[str, object]:
     """Generalized temporal-occlusion saliency: fixed reference centroid,
     single target, no reclustering, no upper/lower bound tied to the 3-5
@@ -847,7 +1038,40 @@ def compute_saliency_map(
     enrollment and cluster mode); this function only rejects an empty
     reference list and an out-of-range segment count so it stays safe to
     call directly (e.g. from tests) without going through the router.
+
+    `saliency_method="integrated_gradients"` returns a time x frequency
+    attribution grid instead (see `integrated_gradients_saliency`), against
+    the same reference centroid. It ignores `occlusion_axis`,
+    `segment_count`, and `band_count`. The default "occlusion" is unchanged.
     """
+
+    if saliency_method not in ("occlusion", "integrated_gradients"):
+        raise ValueError("saliency_method must be 'occlusion' or 'integrated_gradients'.")
+    if saliency_method == "integrated_gradients":
+        if not reference_paths:
+            raise ValueError("At least one reference recording is required.")
+        spec = get_model_spec(model_key)
+        adapter = get_model(model_key)
+        reference_embeddings = [adapter.extract_embedding(path) for path in reference_paths]
+        centroid = F.normalize(torch.stack(reference_embeddings).mean(dim=0), p=2, dim=0)
+        return {
+            "model": spec.key,
+            "model_label": spec.label,
+            "reference_type": reference_type,
+            "cluster_id": cluster_id,
+            "target_recording_id": target_recording_id,
+            "reference_count": len(reference_paths),
+            "threshold": spec.threshold,
+            "saliency_method": "integrated_gradients",
+            "interpretation": (
+                "Integrated Gradients attributes the change in similarity between "
+                "a silent clip and this clip to each time x frequency region. "
+                "Positive attribution pushed the clip towards the reference "
+                "centroid; negative attribution pushed it away. Bands are mel-spaced; "
+                "no perceptual or phonetic meaning is assigned to a band."
+            ),
+            **integrated_gradients_saliency(adapter, centroid, target_path),
+        }
 
     if occlusion_axis not in ("time", "frequency"):
         raise ValueError("occlusion_axis must be 'time' or 'frequency'.")
@@ -884,8 +1108,8 @@ def compute_saliency_map(
                 "means the silenced band supported the match to the reference "
                 "centroid; negative similarity_change means it opposed it. "
                 "influence_strength is the absolute value, used for ranking bands "
-                "by influence regardless of direction. Band labels are listening "
-                "hints, not scientific claims."
+                "by influence regardless of direction. Bands are mel-spaced; no "
+                "perceptual or phonetic meaning is assigned to a band."
             ),
             "bands": bands,
         }

@@ -14,6 +14,11 @@ vi.mock("@/components/audio/WaveformViewer", () => ({
   ),
 }));
 
+// Plotly needs a real layout engine, which jsdom does not provide.
+vi.mock("react-plotly.js", () => ({
+  default: () => <div data-testid="plot" />,
+}));
+
 describe("ClusterSaliencyTab", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -307,7 +312,7 @@ describe("ClusterSaliencyTab", () => {
           band_index: 1,
           low_hz: 50,
           high_hz: 300,
-          label: "Pitch",
+          label: "Band 1",
           occluded_similarity: 0.8,
           similarity_change: 0.08,
           influence_strength: 0.08,
@@ -349,6 +354,87 @@ describe("ClusterSaliencyTab", () => {
     expect(screen.getByTestId("mock-waveform-viewer")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "Frequency" }));
     expect(screen.getByTestId("saliency-band-list")).toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends saliency_method only for Integrated Gradients and keeps its result when switching views", async () => {
+    const base = {
+      model: "ecapa-tdnn",
+      model_label: "ECAPA-TDNN",
+      reference_type: "cluster",
+      cluster_id: "Cluster 1",
+      target_recording_id: "rec_001",
+      reference_count: 1,
+      baseline_similarity: 0.88,
+      threshold: 0.65,
+      audio_duration_seconds: 3.0,
+      interpretation: "irrelevant for this test",
+    };
+    const timeResponse = {
+      ...base,
+      segment_count: 8,
+      segments: [
+        {
+          segment_index: 1,
+          start_seconds: 0.0,
+          end_seconds: 3.0,
+          occluded_similarity: 0.8,
+          similarity_change: 0.08,
+          influence_strength: 0.08,
+        },
+      ],
+    };
+    const gradientResponse = {
+      ...base,
+      saliency_method: "integrated_gradients",
+      n_steps: 32,
+      baseline_input_similarity: 0.0,
+      attributions: [[0.5, 0.38]],
+      time_edges_seconds: [0, 1.5, 3],
+      mel_edges_hz: [50, 8000],
+      time_totals: [0.5, 0.38],
+      bands: [{ band_index: 1, low_hz: 50, high_hz: 8000, label: "Band 1", total_attribution: 0.88 }],
+      outside_bands_total: 0,
+      convergence_delta: 0,
+      total_attribution: 0.88,
+      expected_total: 0.88,
+      completeness_ok: true,
+    };
+
+    const fetchSpy = vi
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({ ok: true, json: async () => timeResponse } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => gradientResponse } as Response);
+
+    render(
+      <ClusterSaliencyTab
+        model="ecapa-tdnn"
+        selectedFile={mockFile1}
+        batchResult={mockBatchResult}
+        submittedIds={mockSubmittedIds}
+        clusterColorMap={mockColorMap}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Generate saliency map/i }));
+    await waitFor(() => expect(screen.getByTestId("mock-waveform-viewer")).toBeInTheDocument());
+    expect((fetchSpy.mock.calls[0][1]?.body as FormData).has("saliency_method")).toBe(false);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Gradient (IG)" }));
+    fireEvent.click(screen.getByRole("button", { name: /Generate saliency map/i }));
+    await waitFor(() => expect(screen.getByTestId("ig-heatmap")).toBeInTheDocument());
+
+    const body = fetchSpy.mock.calls[1][1]?.body as FormData;
+    expect(body.get("saliency_method")).toBe("integrated_gradients");
+    expect(body.has("occlusion_axis")).toBe(false);
+    expect(body.has("band_count")).toBe(false);
+    expect(body.get("reference_type")).toBe("cluster");
+
+    // Switching back and forth shows the stored results without refetching.
+    fireEvent.click(screen.getByRole("radio", { name: "Time" }));
+    expect(screen.getByTestId("mock-waveform-viewer")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Gradient (IG)" }));
+    expect(screen.getByTestId("ig-heatmap")).toBeInTheDocument();
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 });

@@ -140,23 +140,9 @@ def test_mel_band_edges_never_exceed_8_khz_for_high_sample_rates():
     assert service._mel_band_edges(8, 44100)[-1] == 8000.0
 
 
-@pytest.mark.parametrize(
-    ("centre_hz", "label"),
-    [
-        (120.0, "Pitch"),
-        (299.9, "Pitch"),
-        (300.0, "Vowel body"),
-        (999.0, "Vowel body"),
-        (1000.0, "Vowel shape"),
-        (2499.0, "Vowel shape"),
-        (2500.0, "Voice clarity"),
-        (4000.0, "Voice clarity"),
-        (4000.1, "Hiss sounds (s/sh)"),
-        (7000.0, "Hiss sounds (s/sh)"),
-    ],
-)
-def test_band_label_boundaries(centre_hz, label):
-    assert service._band_label(centre_hz) == label
+@pytest.mark.parametrize("band_index", [1, 4, 8, 12])
+def test_band_label_is_neutral_and_one_based(band_index):
+    assert service._band_label(band_index) == f"Band {band_index}"
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +238,7 @@ def test_frequency_mode_response_shape(fake_model, tone_paths):
         }
         assert band["low_hz"] == edges[index]
         assert band["high_hz"] == edges[index + 1]
-        assert band["label"] == service._band_label((edges[index] + edges[index + 1]) / 2)
+        assert band["label"] == f"Band {index + 1}"
         assert band["similarity_change"] == pytest.approx(
             result["baseline_similarity"] - band["occluded_similarity"]
         )
