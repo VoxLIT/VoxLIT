@@ -205,35 +205,45 @@ async def test_recording_audio_returns_exact_bytes(client, fake_dataset_dir):
 
     response = await client.get(f"{BASE}/dataset/recordings/{recording['recording_id']}/audio")
 
+    # No Range header: 200 and the whole file, advertising that ranges work.
     assert response.status_code == 200
     assert response.content == FAKE_RECORDINGS[recording["display_filename"]]
+    assert response.headers["content-type"] == "audio/wav"
+    assert response.headers["accept-ranges"] == "bytes"
+
+
+@pytest.mark.asyncio
+async def test_recording_audio_honours_range_with_a_206(client, fake_dataset_dir):
+    """Served through verification's `stream_audio_file`, so a seek deep into
+    a long meeting fetches only the bytes it needs instead of the whole file."""
+
+    recording = (await client.get(f"{BASE}/dataset/recordings")).json()["recordings"][0]
+    payload = FAKE_RECORDINGS[recording["display_filename"]]
+
+    response = await client.get(
+        f"{BASE}/dataset/recordings/{recording['recording_id']}/audio", headers={"Range": "bytes=0-3"}
+    )
+
+    assert response.status_code == 206
+    assert response.content == payload[0:4]
+    assert response.headers["content-range"] == f"bytes 0-3/{len(payload)}"
+    assert response.headers["content-length"] == "4"
+    assert response.headers["accept-ranges"] == "bytes"
     assert response.headers["content-type"] == "audio/wav"
 
 
 @pytest.mark.asyncio
-async def test_recording_audio_ignores_range_and_serves_the_whole_file(client, fake_dataset_dir):
-    """Documents a real divergence from the reference pattern, rather than
-    asserting the behaviour one might expect.
-
-    `tasks/verification` serves audio through its own `stream_audio_file()`
-    helper, which parses `Range` and returns a genuine 206. task_b's audio
-    routes use a plain `FileResponse`, and Starlette 0.37.2's `FileResponse`
-    ignores `Range` — so a seek request gets 200 and the entire file.
-
-    Harmless for the three small demo meetings, but AMI mixes run to tens of
-    MB, so the timeline's seek downloads the whole file each time. Left as-is
-    here: this suite tests the code, it does not change it.
-    """
-
-    recording_id = await _any_recording_id(client)
+async def test_recording_audio_open_ended_range_returns_the_tail(client, fake_dataset_dir):
+    recording = (await client.get(f"{BASE}/dataset/recordings")).json()["recordings"][0]
+    payload = FAKE_RECORDINGS[recording["display_filename"]]
 
     response = await client.get(
-        f"{BASE}/dataset/recordings/{recording_id}/audio", headers={"Range": "bytes=0-3"}
+        f"{BASE}/dataset/recordings/{recording['recording_id']}/audio", headers={"Range": "bytes=4-"}
     )
 
-    assert response.status_code == 200
-    assert response.content == FAKE_RECORDINGS["ES2004a.Mix-Headset.wav"]
-    assert "content-range" not in response.headers
+    assert response.status_code == 206
+    assert response.content == payload[4:]
+    assert response.headers["content-range"] == f"bytes 4-{len(payload) - 1}/{len(payload)}"
 
 
 @pytest.mark.parametrize("bad_id", BAD_IDS)
@@ -507,6 +517,78 @@ async def test_projection_422s_with_fewer_than_two_embeddings(client, fake_datas
 
 
 @pytest.mark.asyncio
+async def test_projection_defaults_to_2d_with_explained_variance(client, fake_dataset_dir, fake_inference):
+    recording_id = await _any_recording_id(client)
+
+    response = await client.get(
+        f"{BASE}/projection", params={"model": MODEL, "recording_id": recording_id}
+    )
+
+    body = response.json()
+    assert body["dims"] == 2
+    assert len(body["explained_variance"]) == 2
+    assert all(0.0 <= share <= 1.0 for share in body["explained_variance"])
+    assert all("z" not in point for point in body["points"])
+
+
+@pytest.mark.asyncio
+async def test_projection_in_3d_adds_a_z_axis(client, fake_dataset_dir, fake_inference):
+    recording_id = await _any_recording_id(client)
+
+    response = await client.get(
+        f"{BASE}/projection",
+        params={"model": MODEL, "recording_id": recording_id, "dims": 3},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["dims"] == 3
+    assert len(body["explained_variance"]) == 3
+    assert len(body["points"]) == 3
+    for point in body["points"]:
+        assert set(point) == {"id", "x", "y", "z", "speaker", "confidence"}
+        assert isinstance(point["z"], float)
+    # Same cached run as the 2D map -- asking for 3D must not re-diarize.
+    await client.get(f"{BASE}/projection", params={"model": MODEL, "recording_id": recording_id})
+    assert fake_inference.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_projection_3d_422s_with_fewer_than_three_embeddings(client, fake_dataset_dir):
+    """Two points are enough for 2D but not for three PCA components."""
+
+    two = _CountingDiarization(_diarization_payload(num_embeddings=2))
+    recording_id = await _any_recording_id(client)
+
+    with patch("app.tasks.task_b.router.run_diarization", new=two):
+        flat = await client.get(
+            f"{BASE}/projection", params={"model": MODEL, "recording_id": recording_id}
+        )
+        deep = await client.get(
+            f"{BASE}/projection",
+            params={"model": MODEL, "recording_id": recording_id, "dims": 3},
+        )
+
+    assert flat.status_code == 200
+    assert deep.status_code == 422
+    assert "3D projection" in deep.json()["detail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dims", [1, 4])
+async def test_projection_rejects_unsupported_dims(client, fake_dataset_dir, fake_inference, dims):
+    recording_id = await _any_recording_id(client)
+
+    response = await client.get(
+        f"{BASE}/projection",
+        params={"model": MODEL, "recording_id": recording_id, "dims": dims},
+    )
+
+    assert response.status_code == 422
+    assert fake_inference.call_count == 0
+
+
+@pytest.mark.asyncio
 async def test_projection_rejects_an_unknown_model(client, fake_dataset_dir, fake_inference):
     recording_id = await _any_recording_id(client)
 
@@ -614,4 +696,104 @@ async def test_perturbation_422s_on_bad_params_and_writes_nothing(
 @pytest.mark.asyncio
 async def test_perturbation_rejects_malformed_bodies(client, fake_dataset_dir, body):
     response = await client.post(f"{BASE}/perturbation", json=body)
+    assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# POST /perturbation/preview -- build the clip so it can be heard, never diarize
+# ---------------------------------------------------------------------------
+
+NOISE_SPEC = {"type": "noise", "params": {"noise_level": 0.05}}
+
+
+@pytest.mark.asyncio
+async def test_preview_builds_the_clip_without_diarizing(
+    client, fake_dataset_dir, fake_inference, tmp_path
+):
+    recording_id = await _any_recording_id(client)
+    clip = tmp_path / "prt_preview.wav"
+    clip.write_bytes(b"RIFF")
+
+    with patch(
+        "app.tasks.task_b.router.perturbation.perturb_to_session",
+        return_value=("prt_preview", clip, {"noise_level": 0.05}),
+    ) as perturb:
+        response = await client.post(
+            f"{BASE}/perturbation/preview",
+            json={"recording_id": recording_id, "perturbation": NOISE_SPEC},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "perturbed_id": "prt_preview",
+        "perturbation": {"type": "noise", "params": {"noise_level": 0.05}},
+    }
+    perturb.assert_called_once()
+    assert perturb.call_args.args[3:] == ("noise", {"noise_level": 0.05})
+    assert fake_inference.call_count == 0
+    assert await redis_module.redis.keys("result:diar*") == []
+
+
+@pytest.mark.asyncio
+async def test_preview_and_full_run_build_the_same_clip(client, fake_dataset_dir, fake_inference):
+    """Both endpoints go through one helper with the same arguments, so the
+    deterministic `prt_` id -- and the file -- a preview builds is the one the
+    full run reuses."""
+
+    recording_id = await _any_recording_id(client)
+    body = {"recording_id": recording_id, "perturbation": NOISE_SPEC}
+
+    with patch(
+        "app.tasks.task_b.router.perturbation.perturb_to_session",
+        side_effect=ValueError("stop after perturbing"),
+    ) as perturb:
+        await client.post(f"{BASE}/perturbation/preview", json=body)
+        await client.post(f"{BASE}/perturbation", json={**body, "model": MODEL})
+
+    assert perturb.call_count == 2
+    preview_args, run_args = (call.args for call in perturb.call_args_list)
+    assert preview_args[2:] == run_args[2:]  # source hash, type, params
+
+
+@pytest.mark.asyncio
+async def test_preview_404s_for_an_unknown_recording(client, fake_dataset_dir, fake_inference):
+    with patch("app.tasks.task_b.router.perturbation.perturb_to_session") as perturb:
+        response = await client.post(
+            f"{BASE}/perturbation/preview",
+            json={"recording_id": "not-a-real-id", "perturbation": NOISE_SPEC},
+        )
+
+    assert response.status_code == 404
+    perturb.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        {"type": "reverb", "params": {}},
+        {"type": "noise", "params": {}},
+        {"type": "noise", "params": {"noise_level": 5.0}},
+        {"type": "time_masking", "params": {"mask_start_percent": 60, "mask_end_percent": 10}},
+    ],
+)
+@pytest.mark.asyncio
+async def test_preview_422s_on_bad_params(client, fake_dataset_dir, fake_inference, spec):
+    recording_id = await _any_recording_id(client)
+
+    response = await client.post(
+        f"{BASE}/perturbation/preview",
+        json={"recording_id": recording_id, "perturbation": spec},
+    )
+
+    assert response.status_code == 422
+    assert fake_inference.call_count == 0
+
+
+@pytest.mark.parametrize(
+    "body",
+    [{"recording_id": "rec_x"}, {"perturbation": NOISE_SPEC}, {}],
+)
+@pytest.mark.asyncio
+async def test_preview_rejects_malformed_bodies(client, fake_dataset_dir, body):
+    response = await client.post(f"{BASE}/perturbation/preview", json=body)
     assert response.status_code == 422
