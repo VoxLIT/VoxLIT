@@ -9,6 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BatchAnalysisPanel } from "./BatchAnalysisPanel";
 import { ClusterSaliencyTab } from "./ClusterSaliencyTab";
+import { PerturbationSweepCard } from "./PerturbationSweepCard";
 import { SpeakerSaliencyMap } from "./SpeakerSaliencyMap";
 import { buildClusterColorMap } from "./clusterColors";
 import type { BatchAnalysisResponse } from "./batchTypes";
@@ -951,6 +952,11 @@ export const SpeakerVerificationWorkbench = ({
 
           <TabsContent value="perturbation" forceMount className="space-y-4 data-[state=inactive]:hidden">
             <PerturbationTools selectedFile={null} verification={verificationPerturbationContext} />
+            <PerturbationSweepCard
+              model={model}
+              recordingId={verificationPerturbationContext.selectedRecordingId}
+              recordingLabel={verificationPerturbationContext.selectedRecordingLabel}
+            />
           </TabsContent>
         </div>
       </div>

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 import torch
@@ -260,4 +261,246 @@ def perturb_and_compare(
         "embedding_shift": 1.0 - similarity,
         "original_embedding": original_embedding.tolist(),
         "perturbed_embedding": perturbed_embedding.tolist(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Perturbation sweep -- one perturbation type at a fixed, server-defined
+# series of strengths, each compared with the ORIGINAL clip's embedding, plus
+# the strength at which the same-speaker decision flips.
+# ---------------------------------------------------------------------------
+
+# perturbation type -> (parameter name, strengths in increasing order)
+SWEEP_GRIDS: dict[str, tuple[str, tuple[float, ...]]] = {
+    "noise": ("noise_level", (0.001, 0.0025, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2)),
+    "pitch_shift": ("pitch_shift_semitones", (-6.0, -4.0, -2.0, -1.0, 1.0, 2.0, 4.0, 6.0)),
+    "time_stretch": ("stretch_factor", (0.5, 0.7, 0.85, 0.95, 1.05, 1.2, 1.5, 2.0)),
+}
+
+SWEEP_DIRECTIONS: dict[str, tuple[str, ...]] = {
+    "noise": ("stronger",),
+    "pitch_shift": ("down", "up"),
+    "time_stretch": ("slower", "faster"),
+}
+
+_DIRECTION_PHRASES = {
+    "stronger": "added noise",
+    "down": "shifting pitch down",
+    "up": "shifting pitch up",
+    "slower": "slowing down",
+    "faster": "speeding up",
+}
+
+_MAX_REASON_LENGTH = 160
+
+
+def _sweep_direction(perturbation_type: str, strength: float) -> str:
+    if perturbation_type == "pitch_shift":
+        return "down" if strength < 0 else "up"
+    if perturbation_type == "time_stretch":
+        return "slower" if strength < 1.0 else "faster"
+    return "stronger"
+
+
+def _sweep_intensity(perturbation_type: str, strength: float) -> float:
+    """How far `strength` is from "no perturbation", for ordering the points
+    of one direction from weakest to strongest."""
+
+    if perturbation_type == "time_stretch":
+        return abs(strength - 1.0)
+    return abs(strength)
+
+
+def _format_sweep_strength(perturbation_type: str, strength: float) -> str:
+    if perturbation_type == "pitch_shift":
+        return f"{strength:+.3g} semitones"
+    if perturbation_type == "time_stretch":
+        return f"{strength:.3g}x speed"
+    return f"noise level {strength:.3g}"
+
+
+def _short_reason(error: BaseException) -> str:
+    lines = str(error).strip().splitlines()
+    text = lines[0] if lines else type(error).__name__
+    return text[:_MAX_REASON_LENGTH]
+
+
+def _snr_db(original: torch.Tensor, perturbed: torch.Tensor) -> float | None:
+    """10*log10(signal power / added-noise power); None when either power is
+    zero (the ratio would not be finite)."""
+
+    signal_power = float(original.double().pow(2).mean())
+    noise_power = float((perturbed.double() - original.double()).pow(2).mean())
+    if signal_power <= 0 or noise_power <= 0:
+        return None
+    return 10.0 * math.log10(signal_power / noise_power)
+
+
+def _find_flip(
+    perturbation_type: str, direction: str, points: list[dict[str, Any]], threshold: float
+) -> dict[str, Any]:
+    """Walk one direction's "ok" points from weakest to strongest and locate
+    the first one below the threshold. `last_safe_strength` is the strongest
+    "ok" point still judged same-speaker before the flip (or the strongest
+    "ok" point overall when the decision never flips)."""
+
+    ok_points = sorted(
+        (point for point in points if point["direction"] == direction and point["status"] == "ok"),
+        key=lambda point: _sweep_intensity(perturbation_type, point["strength"]),
+    )
+    flip: dict[str, Any] = {
+        "direction": direction,
+        "flipped": False,
+        "flip_strength": None,
+        "last_safe_strength": None,
+        "already_below_at_weakest": False,
+    }
+    previous: dict[str, Any] | None = None
+    for point in ok_points:
+        if point["same_speaker"]:
+            previous = point
+            continue
+        flip["flipped"] = True
+        if previous is None:
+            flip["flip_strength"] = point["strength"]
+            flip["already_below_at_weakest"] = True
+        else:
+            # previous is >= threshold and this point is < threshold, so the
+            # similarities differ and the fraction is within (0, 1].
+            fraction = (previous["similarity"] - threshold) / (previous["similarity"] - point["similarity"])
+            flip["flip_strength"] = previous["strength"] + fraction * (point["strength"] - previous["strength"])
+            flip["last_safe_strength"] = previous["strength"]
+        return flip
+
+    if previous is not None:
+        flip["last_safe_strength"] = previous["strength"]
+    return flip
+
+
+def _sweep_summary(model_label: str, perturbation_type: str, flips: list[dict[str, Any]]) -> str:
+    clauses = []
+    for flip in flips:
+        phrase = _DIRECTION_PHRASES[flip["direction"]]
+        if flip["already_below_at_weakest"]:
+            strength = _format_sweep_strength(perturbation_type, flip["flip_strength"])
+            clauses.append(f"{phrase} already reads as a different speaker at the weakest tested strength ({strength})")
+        elif flip["flipped"]:
+            strength = _format_sweep_strength(perturbation_type, flip["flip_strength"])
+            safe = _format_sweep_strength(perturbation_type, flip["last_safe_strength"])
+            clauses.append(f"{phrase} flips the decision to different speaker at about {strength} (safe up to {safe})")
+        elif flip["last_safe_strength"] is not None:
+            safe = _format_sweep_strength(perturbation_type, flip["last_safe_strength"])
+            clauses.append(f"{phrase} never flips the decision in the tested range (up to {safe})")
+        else:
+            clauses.append(f"{phrase} could not be tested")
+    return f"For {model_label}, " + "; ".join(clauses) + "."
+
+
+def sweep_perturbation(
+    model_key: str,
+    source_path: str | Path,
+    perturbation_type: str,
+    *,
+    cached_original_embedding: torch.Tensor | None = None,
+) -> dict[str, object]:
+    """Apply one perturbation type at each strength of its server-defined
+    grid and compare every perturbed copy with the original clip's embedding
+    (the same comparison `perturb_and_compare` makes for a single strength).
+
+    A point whose transform fails or leaves the audio unchanged (the silent
+    fallback described at the top of this module) is reported as
+    "not_applied" and never aborts the sweep; only a sweep with no usable
+    point at all raises `PerturbationNotApplied`. As in `perturb_and_compare`,
+    the model is not loaded until at least one perturbation is confirmed
+    applied; it and the original embedding are then loaded once and reused.
+    Perturbed audio only ever exists inside a TemporaryDirectory -- a sweep
+    creates no session assets."""
+
+    grid = SWEEP_GRIDS.get(perturbation_type)
+    if grid is None:
+        valid = ", ".join(SWEEP_GRIDS)
+        raise ValueError(f"Unsupported sweep perturbation type '{perturbation_type}'. Valid types: {valid}.")
+    param_name, strengths = grid
+
+    spec = service.get_model_spec(model_key)
+    waveform, sample_rate = _load_mono_waveform(source_path)
+
+    points: list[dict[str, Any]] = []
+    perturbed_waveforms: dict[int, torch.Tensor] = {}
+    for index, strength in enumerate(strengths):
+        point: dict[str, Any] = {
+            "strength": strength,
+            "direction": _sweep_direction(perturbation_type, strength),
+            "status": "not_applied",
+            "reason": None,
+            "similarity": None,
+            "same_speaker": None,
+            "snr_db": None,
+        }
+        points.append(point)
+
+        raw_params: dict[str, Any] = {param_name: strength}
+        if perturbation_type == "noise":
+            raw_params["seed"] = DEFAULT_NOISE_SEED
+        try:
+            params = validate_perturbation_params(perturbation_type, raw_params, sample_rate=sample_rate)
+            perturbed = _apply_single_perturbation(waveform, sample_rate, perturbation_type, params)
+            _validate_output_waveform(perturbed)
+        except Exception as error:  # one bad point must not abort the sweep
+            point["reason"] = _short_reason(error)
+            continue
+        if not _waveform_changed(waveform, perturbed):
+            point["reason"] = "The perturbation did not change the audio (the transform likely failed or timed out)."
+            continue
+
+        if perturbation_type == "noise":
+            point["snr_db"] = _snr_db(waveform, perturbed)
+        perturbed_waveforms[index] = perturbed
+
+    if not perturbed_waveforms:
+        raise PerturbationNotApplied(
+            f"No '{perturbation_type}' sweep point changed the audio. This usually means the "
+            "underlying transform silently failed rather than that the model is robust to it."
+        )
+
+    adapter = service.get_model(model_key)
+    original_embedding = cached_original_embedding
+    if original_embedding is None:
+        original_embedding = adapter.extract_embedding(source_path)
+
+    with TemporaryDirectory(prefix="voxlit-sv-sweep-") as temp_dir:
+        for index, perturbed in perturbed_waveforms.items():
+            point = points[index]
+            point_path = Path(temp_dir) / f"point-{index}.wav"
+            try:
+                torchaudio.save(str(point_path), perturbed, sample_rate)
+                perturbed_embedding = adapter.extract_embedding(point_path)
+                similarity = service._cosine(original_embedding, perturbed_embedding)
+            except service.SpeakerModelUnavailable:
+                raise
+            except Exception as error:  # one bad point must not abort the sweep
+                point["snr_db"] = None
+                point["reason"] = _short_reason(error)
+                continue
+            point["status"] = "ok"
+            point["similarity"] = similarity
+            point["same_speaker"] = similarity >= spec.threshold
+
+    if not any(point["status"] == "ok" for point in points):
+        raise PerturbationNotApplied(f"Every '{perturbation_type}' sweep point failed; no similarity could be computed.")
+
+    flips = [
+        _find_flip(perturbation_type, direction, points, spec.threshold)
+        for direction in SWEEP_DIRECTIONS[perturbation_type]
+    ]
+
+    return {
+        "model": spec.key,
+        "model_label": spec.label,
+        "threshold": spec.threshold,
+        "perturbation_type": perturbation_type,
+        "points": points,
+        "flips": flips,
+        "summary": _sweep_summary(spec.label, perturbation_type, flips),
+        "original_embedding": original_embedding.tolist(),
     }

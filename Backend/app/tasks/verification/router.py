@@ -33,7 +33,7 @@ from .dataset import (
     list_recordings,
     resolve_recording_path,
 )
-from .robustness import perturb_and_compare
+from .robustness import perturb_and_compare, sweep_perturbation
 from .service import (
     PAIR_THRESHOLD_VERSION,
     PREPROCESSING_VERSION,
@@ -931,6 +931,64 @@ async def run_perturbation_comparison(payload: PerturbationRequest, request: Req
         ) from error
 
     return {**result, "source_recording_id": payload.recording_id, "session_asset": asset_metadata}
+
+
+class PerturbationSweepRequest(BaseModel):
+    model: str
+    recording_id: str
+    perturbation_type: str
+
+
+@router.post("/perturbation/sweep")
+async def run_perturbation_sweep(payload: PerturbationSweepRequest, request: Request):
+    """Apply one perturbation type to one selected recording at a fixed
+    series of strengths, compare each with the original's embedding, and
+    report where the same-speaker decision flips. Unlike `/perturbation`,
+    nothing is saved: no session asset is created."""
+
+    sid = _require_sid(request)
+    try:
+        validated_sid = session_assets.validate_and_canonicalize_sid(sid)
+    except session_assets.InvalidSessionId as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    try:
+        spec = get_model_spec(payload.model)
+    except UnsupportedSpeakerModel as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    source_path = await _resolve_audio_source(payload.recording_id, validated_sid)
+
+    audio_hash = (await run_in_threadpool(cache.hash_audio_files, [source_path]))[0]
+    embedding_key = cache.embedding_cache_key(
+        model_key=payload.model,
+        model_id=spec.model_id,
+        revision=spec.revision,
+        preprocessing_version=PREPROCESSING_VERSION,
+        audio_sha256=audio_hash,
+    )
+    cached_raw = await cache.get_embedding(embedding_key, spec.embedding_dimension)
+    cached_embedding = (
+        rehydrate_cached_embedding(payload.model, cached_raw) if cached_raw is not None else None
+    )
+
+    try:
+        result = await run_in_threadpool(
+            sweep_perturbation,
+            payload.model,
+            source_path,
+            payload.perturbation_type,
+            cached_original_embedding=cached_embedding,
+        )
+    except (ValueError, RuntimeError) as error:
+        status = 503 if isinstance(error, SpeakerModelUnavailable) else 422
+        raise HTTPException(status_code=status, detail=str(error)) from error
+
+    original_embedding = result.pop("original_embedding")
+    if cached_embedding is None:
+        await cache.set_embedding(embedding_key, payload.model, original_embedding)
+
+    return {**result, "source_recording_id": payload.recording_id}
 
 
 # ---------------------------------------------------------------------------
