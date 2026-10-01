@@ -15,6 +15,7 @@ import { RefreshCw, Eye, Box, Square, BarChart3, HelpCircle, Info } from "lucide
 import { getFeatureExplanation } from "@/lib/audioFeatures";
 import { API_BASE } from "@/lib/api";
 import { BatchAnalysisKind } from "@/tasks/types";
+import { getNextVerificationPairSelection } from "@/features/verification/pairSelection";
 
 interface EmbeddingPanelProps {
   model?: string;
@@ -240,17 +241,19 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
 
   const handlePointSelect = (filename: string, coordinates: number[]) => {
     // A single point click always updates the existing selected-datapoint
-    // state (drives the Datapoint Editor)
+    // state (drives the Datapoint Editor), for every task including verification.
     if (onFileSelect) {
       onFileSelect(filename);
+    }
+    if (verificationMode) {
+      const next = getNextVerificationPairSelection(pairSelection, filename);
+      onPairSelectionChange?.(next);
     }
   };
 
   const handleAngleRangeSelect = (selectedFiles: string[]) => {
     if (verificationMode) {
-      if (selectedFiles.length > 0 && onFileSelect) {
-        onFileSelect(selectedFiles[0]);
-      }
+      onPairSelectionChange?.(selectedFiles);
       return;
     }
     // Only update if the selection has actually changed
@@ -278,9 +281,7 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
 
   const handle2DSelectionChange = (selectedFiles: string[]) => {
     if (verificationMode) {
-      if (selectedFiles.length > 0 && onFileSelect) {
-        onFileSelect(selectedFiles[0]);
-      }
+      onPairSelectionChange?.(selectedFiles);
       return;
     }
     // Only update if the selection has actually changed
@@ -673,6 +674,7 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
               selectionMode={selectionMode}
               onSelectionChange={handle2DSelectionChange}
               externalData={externalData}
+              externalSelectedLabels={verificationMode ? pairSelection : undefined}
               verificationMode={verificationMode}
             />
           </div>

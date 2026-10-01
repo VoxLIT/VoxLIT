@@ -5,7 +5,12 @@ import { Badge } from "@/components/ui/badge";
 import { SpeakerSaliencyMap } from "./SpeakerSaliencyMap";
 import { verificationAudioUrl } from "./audioUrl";
 import type { BatchAnalysisResponse } from "./batchTypes";
-import type { SaliencyMapResponse } from "./saliencyTypes";
+import {
+  DEFAULT_SALIENCY_BAND_COUNT,
+  EMPTY_SALIENCY_RESULTS,
+  type SaliencyAxis,
+  type SaliencyResultsByAxis,
+} from "./saliencyTypes";
 import type { UploadedFile } from "@/tasks/types";
 import { formatClusterLabel } from "./formatSpeakerLabel";
 
@@ -30,7 +35,9 @@ export const ClusterSaliencyTab = ({
   submittedIds,
   clusterColorMap,
 }: ClusterSaliencyTabProps) => {
-  const [saliencyResult, setSaliencyResult] = useState<SaliencyMapResponse | null>(null);
+  // One result per occlusion axis, so switching axis never refetches.
+  const [saliencyAxis, setSaliencyAxis] = useState<SaliencyAxis>("time");
+  const [saliencyResults, setSaliencyResults] = useState<SaliencyResultsByAxis>(EMPTY_SALIENCY_RESULTS);
   const [saliencyError, setSaliencyError] = useState<string | null>(null);
   const [isSaliencyLoading, setIsSaliencyLoading] = useState(false);
   const [saliencySegmentCount, setSaliencySegmentCount] = useState(DEFAULT_SALIENCY_SEGMENT_COUNT);
@@ -65,17 +72,17 @@ export const ClusterSaliencyTab = ({
       saliencyAbortRef.current.abort();
       saliencyAbortRef.current = null;
     }
-    setSaliencyResult(null);
+    setSaliencyResults(EMPTY_SALIENCY_RESULTS);
     setSaliencyError(null);
   }, [selectedFile?.file_id]);
 
-  // Invalidate when segment-count control changes
+  // Invalidate the time result when segment-count control changes
   useEffect(() => {
     if (isFirstSegmentCountRender.current) {
       isFirstSegmentCountRender.current = false;
       return;
     }
-    setSaliencyResult(null);
+    setSaliencyResults((prev) => ({ ...prev, time: null }));
     setSaliencyError(null);
   }, [saliencySegmentCount]);
 
@@ -85,7 +92,7 @@ export const ClusterSaliencyTab = ({
       saliencyAbortRef.current.abort();
       saliencyAbortRef.current = null;
     }
-    setSaliencyResult(null);
+    setSaliencyResults(EMPTY_SALIENCY_RESULTS);
     setSaliencyError(null);
   }, [batchResult, model]);
 
@@ -104,10 +111,15 @@ export const ClusterSaliencyTab = ({
     formData.append("target_recording_id", selectedFile.file_id);
     formData.append("cluster_id", targetClusterId);
     formData.append("segment_count", String(saliencySegmentCount));
+    const requestAxis = saliencyAxis;
+    if (requestAxis === "frequency") {
+      formData.append("occlusion_axis", "frequency");
+      formData.append("band_count", String(DEFAULT_SALIENCY_BAND_COUNT));
+    }
 
     setIsSaliencyLoading(true);
     setSaliencyError(null);
-    setSaliencyResult(null);
+    setSaliencyResults((prev) => ({ ...prev, [requestAxis]: null }));
 
     try {
       const response = await fetch(`${API_BASE}/tasks/verification/explain/saliency`, {
@@ -120,7 +132,7 @@ export const ClusterSaliencyTab = ({
       if (!response.ok) {
         throw new Error(payload.detail || `Saliency map failed (${response.status}).`);
       }
-      setSaliencyResult(payload as SaliencyMapResponse);
+      setSaliencyResults((prev) => ({ ...prev, [requestAxis]: payload }));
     } catch (caught) {
       if (isAbortError(caught)) return;
       setSaliencyError(caught instanceof Error ? caught.message : "Saliency map failed.");
@@ -185,7 +197,7 @@ export const ClusterSaliencyTab = ({
           title={`Cluster saliency — ${selectedFile.filename}`}
           audioUrl={isTargetIdResolvable ? verificationAudioUrl(selectedFile.file_id) : undefined}
           requireCredentials={true}
-          result={saliencyResult}
+          result={saliencyResults[saliencyAxis]}
           isLoading={isSaliencyLoading}
           error={saliencyError}
           staleReason={null}
@@ -194,6 +206,8 @@ export const ClusterSaliencyTab = ({
           generateLabel="Generate saliency map"
           segmentCount={saliencySegmentCount}
           onSegmentCountChange={setSaliencySegmentCount}
+          occlusionAxis={saliencyAxis}
+          onOcclusionAxisChange={setSaliencyAxis}
           clusterBadge={
             targetClusterId ? { label: formatClusterLabel(targetClusterId), color: clusterColorMap[targetClusterId] ?? "#3b82f6" } : null
           }

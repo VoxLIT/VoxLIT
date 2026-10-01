@@ -1,7 +1,8 @@
-import { AlertTriangle, CheckCircle2, GitCompareArrows, HelpCircle, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, GitCompareArrows, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { InfoTooltip } from "./InfoTooltip";
 import type { BatchAnalysisResponse } from "./batchTypes";
 import { formatClusterLabel } from "./formatSpeakerLabel";
 
@@ -69,44 +70,43 @@ export const PairComparisonCard = ({ selectedLabels, batchResult, labelToIndex, 
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1 text-muted-foreground">
                 Cosine similarity
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
-                  </TooltipTrigger>
-                  <TooltipContent className="text-xs space-y-1">
-                    <p>How alike these two recordings&apos; voice embeddings are, from -1 to 1. Higher means more similar.</p>
-                    <p>This is evidence toward the same/different-speaker call, judged against the threshold below — not proof of identity on its own.</p>
-                  </TooltipContent>
-                </Tooltip>
+                <InfoTooltip title="Cosine similarity">
+                  <p>
+                    How alike these two recordings&apos; voice embeddings (the model&apos;s numeric voice fingerprints)
+                    are, from -1 to 1. Higher means more similar.
+                  </p>
+                  <p>
+                    It is evidence toward the same/different-speaker call, judged against the threshold below. It is
+                    not proof of identity on its own.
+                  </p>
+                </InfoTooltip>
               </span>
               <Badge variant="secondary">{formatScore(pairDetails.similarity)}</Badge>
             </div>
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1 text-muted-foreground">
                 Pair threshold ({batchResult.model_label})
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
-                  </TooltipTrigger>
-                  <TooltipContent className="text-xs space-y-1">
-                    <p>The calibrated similarity cutoff this model uses to decide same speaker vs. different speakers for a pair.</p>
-                    <p>Separately calibrated from the clustering distance threshold, so the two can be different values.</p>
-                  </TooltipContent>
-                </Tooltip>
+                <InfoTooltip title="Pair threshold">
+                  <p>
+                    The calibrated similarity cutoff this model uses to decide same speaker vs. different speakers for
+                    a pair.
+                  </p>
+                  <p>
+                    It is set separately from the clustering distance threshold, so the two can be different values.
+                  </p>
+                </InfoTooltip>
               </span>
               <Badge variant="secondary">{formatScore(batchResult.threshold)}</Badge>
             </div>
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1 text-muted-foreground">
                 Threshold margin
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <HelpCircle className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors" />
-                  </TooltipTrigger>
-                  <TooltipContent className="text-xs space-y-1">
-                    <p>How far this pair&apos;s similarity sits from the decision boundary. A margin near zero means the same/different call was close.</p>
-                  </TooltipContent>
-                </Tooltip>
+                <InfoTooltip title="Threshold margin">
+                  <p>
+                    How far this pair&apos;s similarity sits from the decision boundary. A margin near zero means the
+                    same/different call was close.
+                  </p>
+                </InfoTooltip>
               </span>
               <Badge
                 variant="secondary"

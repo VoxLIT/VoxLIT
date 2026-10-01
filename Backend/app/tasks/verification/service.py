@@ -628,6 +628,147 @@ def _occlude_and_score(
     return baseline_similarity, audio_duration_seconds, segments
 
 
+BAND_OCCLUSION_MIN_HZ = 50.0
+BAND_OCCLUSION_MAX_HZ = 8000.0
+
+
+def _hz_to_mel(hz: float) -> float:
+    return 2595.0 * float(np.log10(1.0 + hz / 700.0))
+
+
+def _mel_to_hz(mel: float) -> float:
+    return 700.0 * (10.0 ** (mel / 2595.0) - 1.0)
+
+
+def _mel_band_edges(band_count: int, sample_rate: int) -> list[float]:
+    """`band_count + 1` band edges in Hz, evenly spaced on the mel scale from
+    50 Hz to min(8000, sample_rate / 2)."""
+
+    upper_hz = min(BAND_OCCLUSION_MAX_HZ, sample_rate / 2)
+    if upper_hz <= BAND_OCCLUSION_MIN_HZ:
+        raise ValueError("Target audio sample rate is too low for frequency-band occlusion.")
+    mels = np.linspace(_hz_to_mel(BAND_OCCLUSION_MIN_HZ), _hz_to_mel(upper_hz), band_count + 1)
+    edges = [_mel_to_hz(float(mel)) for mel in mels]
+    # Pin the outer edges so they are exact rather than off by float rounding.
+    edges[0] = BAND_OCCLUSION_MIN_HZ
+    edges[-1] = float(upper_hz)
+    return edges
+
+
+def _band_label(centre_hz: float) -> str:
+    """Friendly hint for a band from its centre frequency. These are rough
+    listening hints for the UI, not scientific claims about what the model
+    uses."""
+
+    if centre_hz < 300:
+        return "Pitch"
+    if centre_hz < 1000:
+        return "Vowel body"
+    if centre_hz < 2500:
+        return "Vowel shape"
+    if centre_hz <= 4000:
+        return "Voice clarity"
+    return "Hiss sounds (s/sh)"
+
+
+def _band_stft_size(sample_rate: int) -> int:
+    """n_fft 512 at 16 kHz, scaled for other rates (kept even)."""
+
+    return max(16, 2 * int(round(512 * sample_rate / 16000 / 2)))
+
+
+def _silence_band(
+    waveform: torch.Tensor,
+    sample_rate: int,
+    low_hz: float,
+    high_hz: float,
+    *,
+    include_upper: bool = False,
+) -> torch.Tensor:
+    """STFT (Hann window) -> zero the bins inside [low_hz, high_hz) -> iSTFT
+    back to exactly the original length. An empty range zeroes nothing and
+    reconstructs the input."""
+
+    n_fft = _band_stft_size(sample_rate)
+    hop_length = n_fft // 4
+    total_samples = waveform.shape[-1]
+    if total_samples <= n_fft // 2:
+        raise ValueError("Target audio is too short for frequency-band occlusion.")
+
+    window = torch.hann_window(n_fft, dtype=waveform.dtype)
+    spectrum = torch.stft(
+        waveform, n_fft, hop_length=hop_length, window=window, return_complex=True
+    )
+    bin_hz = torch.arange(spectrum.shape[-2], dtype=torch.float64) * sample_rate / n_fft
+    upper = bin_hz <= high_hz if include_upper else bin_hz < high_hz
+    spectrum[..., (bin_hz >= low_hz) & upper, :] = 0
+    return torch.istft(
+        spectrum, n_fft, hop_length=hop_length, window=window, length=total_samples
+    )
+
+
+def _occlude_bands_and_score(
+    adapter: SpeakerEmbeddingAdapter,
+    centroid: torch.Tensor,
+    target_path: str | Path,
+    band_count: int,
+) -> tuple[float, float, list[dict[str, float | int | str]]]:
+    """Silence each frequency band of target_path once, scoring against a
+    fixed centroid. Returns (baseline_similarity, audio_duration_seconds, bands).
+
+    Bands are mel-spaced from 50 Hz to min(8000, sample_rate / 2). Content
+    above 8 kHz (and below 50 Hz) is never silenced and is left untouched.
+    Deterministic: no randomness anywhere.
+
+    Each band carries a friendly `label` from its centre frequency -- <300 Hz
+    "Pitch", 300-1000 "Vowel body", 1000-2500 "Vowel shape", 2500-4000
+    "Voice clarity", >4000 "Hiss sounds (s/sh)". These are hints for readers,
+    not scientific claims.
+
+    No reference-count or band-count constraints here -- callers own those."""
+
+    baseline_embedding = adapter.extract_embedding(target_path)
+    baseline_similarity = _cosine(centroid, baseline_embedding)
+
+    waveform, sample_rate = torchaudio.load(str(target_path))
+    if waveform.numel() == 0:
+        raise ValueError("Target audio is empty.")
+    if waveform.shape[0] > 1:
+        waveform = waveform.mean(dim=0, keepdim=True)
+
+    total_samples = waveform.shape[1]
+    audio_duration_seconds = total_samples / sample_rate
+    edges = _mel_band_edges(band_count, sample_rate)
+    bands: list[dict[str, float | int | str]] = []
+
+    with TemporaryDirectory(prefix="voxlit-band-occlusion-") as temp_dir:
+        for index in range(band_count):
+            low_hz = edges[index]
+            high_hz = edges[index + 1]
+            occluded = _silence_band(
+                waveform, sample_rate, low_hz, high_hz, include_upper=index == band_count - 1
+            )
+            occluded_path = Path(temp_dir) / f"band-{index}.wav"
+            torchaudio.save(str(occluded_path), occluded, sample_rate)
+
+            occluded_embedding = adapter.extract_embedding(occluded_path)
+            occluded_similarity = _cosine(centroid, occluded_embedding)
+            similarity_change = baseline_similarity - occluded_similarity
+            bands.append(
+                {
+                    "band_index": index + 1,
+                    "low_hz": low_hz,
+                    "high_hz": high_hz,
+                    "label": _band_label((low_hz + high_hz) / 2),
+                    "occluded_similarity": occluded_similarity,
+                    "similarity_change": similarity_change,
+                    "influence_strength": abs(similarity_change),
+                }
+            )
+
+    return baseline_similarity, audio_duration_seconds, bands
+
+
 def temporal_occlusion_saliency(
     model_key: str,
     enrollment_paths: Sequence[str | Path],
@@ -687,10 +828,17 @@ def compute_saliency_map(
     cluster_id: str | None = None,
     target_recording_id: str | None = None,
     segment_count: int = 8,
+    occlusion_axis: str = "time",
+    band_count: int = 8,
 ) -> dict[str, object]:
     """Generalized temporal-occlusion saliency: fixed reference centroid,
     single target, no reclustering, no upper/lower bound tied to the 3-5
     pair-verification enrollment rule.
+
+    `occlusion_axis="frequency"` silences mel-spaced frequency bands instead
+    of time segments (see `_occlude_bands_and_score`) and returns
+    `occlusion_axis`/`band_count`/`bands` in place of
+    `segment_count`/`segments`. The default "time" response is unchanged.
 
     `reference_type`/`cluster_id`/`target_recording_id` are pure passthrough
     metadata the caller already knows (this function never derives or
@@ -701,15 +849,46 @@ def compute_saliency_map(
     call directly (e.g. from tests) without going through the router.
     """
 
+    if occlusion_axis not in ("time", "frequency"):
+        raise ValueError("occlusion_axis must be 'time' or 'frequency'.")
     if not reference_paths:
         raise ValueError("At least one reference recording is required.")
-    if not 4 <= segment_count <= 20:
+    if occlusion_axis == "time" and not 4 <= segment_count <= 20:
         raise ValueError("Temporal occlusion requires between 4 and 20 segments.")
+    if occlusion_axis == "frequency" and not 4 <= band_count <= 12:
+        raise ValueError("Frequency-band occlusion requires between 4 and 12 bands.")
 
     spec = get_model_spec(model_key)
     adapter = get_model(model_key)
     reference_embeddings = [adapter.extract_embedding(path) for path in reference_paths]
     centroid = F.normalize(torch.stack(reference_embeddings).mean(dim=0), p=2, dim=0)
+
+    if occlusion_axis == "frequency":
+        baseline_similarity, audio_duration_seconds, bands = _occlude_bands_and_score(
+            adapter, centroid, target_path, band_count
+        )
+        return {
+            "model": spec.key,
+            "model_label": spec.label,
+            "reference_type": reference_type,
+            "cluster_id": cluster_id,
+            "target_recording_id": target_recording_id,
+            "reference_count": len(reference_paths),
+            "baseline_similarity": baseline_similarity,
+            "threshold": spec.threshold,
+            "occlusion_axis": "frequency",
+            "band_count": band_count,
+            "audio_duration_seconds": audio_duration_seconds,
+            "interpretation": (
+                "Each frequency band was silenced once. Positive similarity_change "
+                "means the silenced band supported the match to the reference "
+                "centroid; negative similarity_change means it opposed it. "
+                "influence_strength is the absolute value, used for ranking bands "
+                "by influence regardless of direction. Band labels are listening "
+                "hints, not scientific claims."
+            ),
+            "bands": bands,
+        }
 
     baseline_similarity, audio_duration_seconds, segments = _occlude_and_score(
         adapter, centroid, target_path, segment_count

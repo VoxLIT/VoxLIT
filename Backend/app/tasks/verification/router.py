@@ -33,7 +33,7 @@ from .dataset import (
     list_recordings,
     resolve_recording_path,
 )
-from .robustness import perturb_and_compare
+from .robustness import perturb_and_compare, sweep_perturbation
 from .service import (
     PAIR_THRESHOLD_VERSION,
     PREPROCESSING_VERSION,
@@ -743,6 +743,8 @@ async def run_saliency_map(
     reference_recording_ids: list[str] = Form(default_factory=list),
     target_recording_id: str | None = Form(None),
     cluster_id: str | None = Form(None),
+    occlusion_axis: str = Form("time"),
+    band_count: int = Form(8),
 ):
     """Generalized saliency map, generalizing `/explain/temporal-occlusion`
     with a `reference_type`:
@@ -757,12 +759,27 @@ async def run_saliency_map(
 
     `/explain/temporal-occlusion` is untouched and keeps serving the raw-file
     -upload Pair Verification flow unchanged.
+
+    `occlusion_axis` picks what is silenced: "time" (default, `segment_count`
+    time segments) or "frequency" (`band_count` mel-spaced frequency bands).
     """
 
     if reference_type not in ("cluster", "enrollment"):
         raise HTTPException(status_code=422, detail="reference_type must be 'cluster' or 'enrollment'.")
     if not 4 <= segment_count <= 20:
         raise HTTPException(status_code=422, detail="Choose between 4 and 20 occlusion segments.")
+    if occlusion_axis not in ("time", "frequency"):
+        raise HTTPException(status_code=422, detail="occlusion_axis must be 'time' or 'frequency'.")
+    if not 4 <= band_count <= 12:
+        raise HTTPException(status_code=422, detail="Choose between 4 and 12 frequency bands.")
+
+    # Only frequency requests carry the new arguments, so a time request
+    # reaches compute_saliency_map exactly as it did before.
+    axis_kwargs = (
+        {"occlusion_axis": occlusion_axis, "band_count": band_count}
+        if occlusion_axis == "frequency"
+        else {}
+    )
 
     # Strict mutual exclusivity -- fields belonging to the other mode are
     # rejected outright, never silently ignored.
@@ -812,6 +829,7 @@ async def run_saliency_map(
                 cluster_id=response_cluster_id,
                 target_recording_id=response_target_id,
                 segment_count=segment_count,
+                **axis_kwargs,
             )
     except HTTPException:
         raise
@@ -913,6 +931,64 @@ async def run_perturbation_comparison(payload: PerturbationRequest, request: Req
         ) from error
 
     return {**result, "source_recording_id": payload.recording_id, "session_asset": asset_metadata}
+
+
+class PerturbationSweepRequest(BaseModel):
+    model: str
+    recording_id: str
+    perturbation_type: str
+
+
+@router.post("/perturbation/sweep")
+async def run_perturbation_sweep(payload: PerturbationSweepRequest, request: Request):
+    """Apply one perturbation type to one selected recording at a fixed
+    series of strengths, compare each with the original's embedding, and
+    report where the same-speaker decision flips. Unlike `/perturbation`,
+    nothing is saved: no session asset is created."""
+
+    sid = _require_sid(request)
+    try:
+        validated_sid = session_assets.validate_and_canonicalize_sid(sid)
+    except session_assets.InvalidSessionId as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    try:
+        spec = get_model_spec(payload.model)
+    except UnsupportedSpeakerModel as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    source_path = await _resolve_audio_source(payload.recording_id, validated_sid)
+
+    audio_hash = (await run_in_threadpool(cache.hash_audio_files, [source_path]))[0]
+    embedding_key = cache.embedding_cache_key(
+        model_key=payload.model,
+        model_id=spec.model_id,
+        revision=spec.revision,
+        preprocessing_version=PREPROCESSING_VERSION,
+        audio_sha256=audio_hash,
+    )
+    cached_raw = await cache.get_embedding(embedding_key, spec.embedding_dimension)
+    cached_embedding = (
+        rehydrate_cached_embedding(payload.model, cached_raw) if cached_raw is not None else None
+    )
+
+    try:
+        result = await run_in_threadpool(
+            sweep_perturbation,
+            payload.model,
+            source_path,
+            payload.perturbation_type,
+            cached_original_embedding=cached_embedding,
+        )
+    except (ValueError, RuntimeError) as error:
+        status = 503 if isinstance(error, SpeakerModelUnavailable) else 422
+        raise HTTPException(status_code=status, detail=str(error)) from error
+
+    original_embedding = result.pop("original_embedding")
+    if cached_embedding is None:
+        await cache.set_embedding(embedding_key, payload.model, original_embedding)
+
+    return {**result, "source_recording_id": payload.recording_id}
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { HelpCircle, Layers } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
+import { InfoTooltip } from "./InfoTooltip";
 import type { ClusterSummary } from "./batchTypes";
 import { formatClusterLabel } from "./formatSpeakerLabel";
 
@@ -111,45 +112,30 @@ export const ClusterSummaryList = ({
                     {cluster.min_intra_cluster_similarity === null
                       ? "Not applicable"
                       : formatScore(cluster.min_intra_cluster_similarity)}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <HelpCircle
-                          className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors"
-                          onClick={(event) => event.stopPropagation()}
-                        />
-                      </TooltipTrigger>
-                      <TooltipContent className="text-xs space-y-1">
-                        <p>The weakest similarity between any two recordings in this cluster — the cluster&apos;s loosest link.</p>
-                      </TooltipContent>
-                    </Tooltip>
+                    <InfoTooltip title="Lowest similarity in cluster" stopClickPropagation>
+                      <p>
+                        The weakest similarity between any two recordings in this cluster. It is the cluster&apos;s
+                        loosest link.
+                      </p>
+                    </InfoTooltip>
                   </span>
                   <span className="flex items-center gap-1">
                     Mean cluster fit score: {formatScore(cluster.mean_fit_score)}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <HelpCircle
-                          className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors"
-                          onClick={(event) => event.stopPropagation()}
-                        />
-                      </TooltipTrigger>
-                      <TooltipContent className="text-xs space-y-1">
-                        <p>How well this cluster&apos;s recordings fit together on average. Higher means the members are more consistently similar to one another.</p>
-                      </TooltipContent>
-                    </Tooltip>
+                    <InfoTooltip title="Mean cluster fit score" stopClickPropagation>
+                      <p>
+                        How well this cluster&apos;s recordings fit together on average. Higher means the members are
+                        more consistently similar to one another.
+                      </p>
+                    </InfoTooltip>
                   </span>
                   <span className="flex items-center gap-1">
                     Representative clip: {resolve(cluster.representative_label)}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <HelpCircle
-                          className="h-3 w-3 text-muted-foreground hover:text-primary cursor-help transition-colors"
-                          onClick={(event) => event.stopPropagation()}
-                        />
-                      </TooltipTrigger>
-                      <TooltipContent className="text-xs space-y-1">
-                        <p>The recording used to represent this cluster in summaries — not necessarily the &quot;true&quot; center of the cluster.</p>
-                      </TooltipContent>
-                    </Tooltip>
+                    <InfoTooltip title="Representative clip" stopClickPropagation>
+                      <p>
+                        The recording used to represent this cluster in summaries. It is not necessarily the
+                        &quot;true&quot; center of the cluster.
+                      </p>
+                    </InfoTooltip>
                   </span>
                 </div>
                 <div

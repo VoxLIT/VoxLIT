@@ -261,10 +261,94 @@ describe("ClusterSaliencyTab", () => {
     expect(body.get("target_recording_id")).toBe("rec_001");
     expect(body.get("cluster_id")).toBe("Cluster 1");
     expect(body.getAll("reference_recording_ids")).toEqual(["rec_002"]);
+    // Time requests carry no axis fields
+    expect(body.has("occlusion_axis")).toBe(false);
+    expect(body.has("band_count")).toBe(false);
 
     // After success, waveform viewer should be present
     await waitFor(() => {
       expect(screen.getByTestId("mock-waveform-viewer")).toBeInTheDocument();
     });
+  });
+
+  it("sends the frequency axis and keeps each axis's result when switching back and forth", async () => {
+    const base = {
+      model: "ecapa-tdnn",
+      model_label: "ECAPA-TDNN",
+      reference_type: "cluster",
+      cluster_id: "Cluster 1",
+      target_recording_id: "rec_001",
+      reference_count: 1,
+      baseline_similarity: 0.88,
+      threshold: 0.65,
+      audio_duration_seconds: 3.0,
+      interpretation: "irrelevant for this test",
+    };
+    const timeResponse = {
+      ...base,
+      segment_count: 8,
+      segments: [
+        {
+          segment_index: 1,
+          start_seconds: 0.0,
+          end_seconds: 3.0,
+          occluded_similarity: 0.8,
+          similarity_change: 0.08,
+          influence_strength: 0.08,
+        },
+      ],
+    };
+    const frequencyResponse = {
+      ...base,
+      occlusion_axis: "frequency",
+      band_count: 8,
+      bands: [
+        {
+          band_index: 1,
+          low_hz: 50,
+          high_hz: 300,
+          label: "Pitch",
+          occluded_similarity: 0.8,
+          similarity_change: 0.08,
+          influence_strength: 0.08,
+        },
+      ],
+    };
+
+    const fetchSpy = vi
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({ ok: true, json: async () => timeResponse } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => frequencyResponse } as Response);
+
+    render(
+      <ClusterSaliencyTab
+        model="ecapa-tdnn"
+        selectedFile={mockFile1}
+        batchResult={mockBatchResult}
+        submittedIds={mockSubmittedIds}
+        clusterColorMap={mockColorMap}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Generate saliency map/i }));
+    await waitFor(() => expect(screen.getByTestId("mock-waveform-viewer")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("radio", { name: "Frequency" }));
+    expect(screen.queryByTestId("mock-waveform-viewer")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Generate saliency map/i }));
+    await waitFor(() => expect(screen.getByTestId("saliency-band-list")).toBeInTheDocument());
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const body = fetchSpy.mock.calls[1][1]?.body as FormData;
+    expect(body.get("occlusion_axis")).toBe("frequency");
+    expect(body.get("band_count")).toBe("8");
+    expect(body.get("reference_type")).toBe("cluster");
+
+    // Switching back and forth shows the stored results without refetching.
+    fireEvent.click(screen.getByRole("radio", { name: "Time" }));
+    expect(screen.getByTestId("mock-waveform-viewer")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "Frequency" }));
+    expect(screen.getByTestId("saliency-band-list")).toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 });
