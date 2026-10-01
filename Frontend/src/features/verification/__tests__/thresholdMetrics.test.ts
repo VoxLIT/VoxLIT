@@ -74,6 +74,42 @@ describe("metricsAt", () => {
     expect(metrics.accuracy).toBeCloseTo(4 / 6);
   });
 
+  it("computes balanced accuracy on a hand-made unbalanced case", () => {
+    // 1 same-speaker pair (accepted), 4 different-speaker pairs (1 accepted).
+    const pairs = [
+      pair(0.9, true),
+      pair(0.7, false, 0, 2),
+      pair(0.3, false, 0, 3),
+      pair(0.2, false, 1, 2),
+      pair(0.1, false, 1, 3),
+    ];
+    const metrics = metricsAt(pairs, 0.5);
+
+    expect(metrics.far).toBe(0.25);
+    expect(metrics.frr).toBe(0);
+    expect(metrics.balancedAccuracy).toBeCloseTo(0.875); // ((1 - 0.25) + (1 - 0)) / 2
+    expect(metrics.accuracy).toBeCloseTo(0.8);
+    expect(metricsAt(buildPairs(labelled), 0.5).balancedAccuracy).toBeCloseTo(2 / 3);
+  });
+
+  it("gives a balanced accuracy of 0.5 when everything is rejected or everything is accepted", () => {
+    const pairs = buildPairs(labelled);
+
+    const rejectAll = metricsAt(pairs, 0.95);
+    expect(rejectAll.accepted).toBe(0);
+    expect(rejectAll.balancedAccuracy).toBe(0.5);
+
+    const acceptAll = metricsAt(pairs, 0.05);
+    expect(acceptAll.accepted).toBe(6);
+    expect(acceptAll.balancedAccuracy).toBe(0.5);
+  });
+
+  it("returns a null balanced accuracy when either rate is null", () => {
+    expect(metricsAt([pair(0.7, false)], 0.5).balancedAccuracy).toBeNull();
+    expect(metricsAt([pair(0.7, true)], 0.5).balancedAccuracy).toBeNull();
+    expect(metricsAt(buildPairs(unlabelled), 0.5).balancedAccuracy).toBeNull();
+  });
+
   it("accepts a pair whose similarity equals the threshold", () => {
     const metrics = metricsAt(buildPairs(labelled), 0.6);
     expect(metrics.accepted).toBe(3);

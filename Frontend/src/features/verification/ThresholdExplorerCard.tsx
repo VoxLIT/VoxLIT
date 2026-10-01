@@ -47,9 +47,61 @@ const verticalLine = (x: number, dash: "dash" | "solid", color: string) => ({
   line: { color, width: 2, dash },
 });
 
+// The slider and both charts share one x range and one pair of horizontal
+// plot margins (px), so the thumb sits directly above the charts' threshold
+// lines.
+const PLOT_MARGIN_LEFT = 56;
+const PLOT_MARGIN_RIGHT = 16;
+const SLIDER_THUMB_WIDTH = 16;
+const SLIDER_TRACK_HEIGHT = 4;
+const SLIDER_CLASS = "sv-threshold-slider";
+
+// A native range thumb only travels between half a thumb width from each end
+// of the input, so the input is widened by half a thumb on each side: the
+// thumb centre then lands exactly on the plot-area edges at min and max. The
+// thumb is sized explicitly so this holds in every browser.
+const thumbCss = `
+  box-sizing: border-box;
+  width: ${SLIDER_THUMB_WIDTH}px;
+  height: ${SLIDER_THUMB_WIDTH}px;
+  border: 2px solid #ffffff;
+  border-radius: 9999px;
+  background: ${LINE_COLOR};
+  cursor: pointer;`;
+const trackCss = `
+  height: ${SLIDER_TRACK_HEIGHT}px;
+  border-radius: 9999px;
+  background: ${NEUTRAL_COLOR};`;
+const SLIDER_CSS = `
+.${SLIDER_CLASS} {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  box-sizing: border-box;
+  width: calc(100% + ${SLIDER_THUMB_WIDTH}px);
+  height: ${SLIDER_THUMB_WIDTH}px;
+  margin: 0 -${SLIDER_THUMB_WIDTH / 2}px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.${SLIDER_CLASS}::-webkit-slider-runnable-track {${trackCss}
+}
+.${SLIDER_CLASS}::-moz-range-track {${trackCss}
+}
+.${SLIDER_CLASS}::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: ${(SLIDER_TRACK_HEIGHT - SLIDER_THUMB_WIDTH) / 2}px;${thumbCss}
+}
+.${SLIDER_CLASS}::-moz-range-thumb {${thumbCss}
+}
+`;
+
 const BASE_LAYOUT = {
   autosize: true,
-  margin: { l: 50, r: 16, t: 10, b: 40 },
+  margin: { l: PLOT_MARGIN_LEFT, r: PLOT_MARGIN_RIGHT, t: 10, b: 40 },
   plot_bgcolor: "transparent",
   paper_bgcolor: "transparent",
   font: { size: 10 },
@@ -120,6 +172,9 @@ export const ThresholdExplorerCard = ({ batchResult, resolveLabel }: ThresholdEx
         ),
       ];
 
+  // One fixed x range for the slider and both charts.
+  const sharedXAxis = { range: [sliderMin, sliderMax], autorange: false as const, automargin: false };
+
   const thresholdShapes = [
     verticalLine(calibrated, "dash", CALIBRATED_COLOR),
     verticalLine(whatIf, "solid", LINE_COLOR),
@@ -133,8 +188,9 @@ export const ThresholdExplorerCard = ({ batchResult, resolveLabel }: ThresholdEx
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-xs">
+        <style>{SLIDER_CSS}</style>
         <div className="space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2" data-testid="threshold-header-row">
             <span className="flex items-center gap-1 text-muted-foreground">
               What-if threshold
               <Badge variant="secondary" data-testid="whatif-threshold">
@@ -152,22 +208,31 @@ export const ThresholdExplorerCard = ({ batchResult, resolveLabel }: ThresholdEx
                   batch&apos;s EER threshold. This slider is a what-if view only.
                 </p>
               </InfoTooltip>
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-1"
+                onClick={() => setWhatIf(calibrated)}
+                disabled={whatIf === calibrated}
+              >
+                Reset to calibrated
+              </Button>
             </span>
           </div>
-          <div className="flex items-center gap-3">
+          <div
+            data-testid="threshold-slider-row"
+            style={{ paddingLeft: PLOT_MARGIN_LEFT, paddingRight: PLOT_MARGIN_RIGHT }}
+          >
             <input
               type="range"
               aria-label="What-if threshold"
-              className="h-2 flex-1 cursor-pointer accent-primary"
+              className={SLIDER_CLASS}
               min={sliderMin}
               max={sliderMax}
               step={SLIDER_STEP}
               value={whatIf}
               onChange={(event) => setWhatIf(Number(event.target.value))}
             />
-            <Button size="sm" variant="outline" onClick={() => setWhatIf(calibrated)} disabled={whatIf === calibrated}>
-              Reset to calibrated
-            </Button>
           </div>
         </div>
 
@@ -179,8 +244,8 @@ export const ThresholdExplorerCard = ({ batchResult, resolveLabel }: ThresholdEx
               layout={{
                 ...BASE_LAYOUT,
                 barmode: "overlay",
-                xaxis: { title: { text: "Cosine similarity" } },
-                yaxis: { title: { text: "Pairs" } },
+                xaxis: { title: { text: "Cosine similarity" }, ...sharedXAxis },
+                yaxis: { title: { text: "Pairs" }, automargin: false },
                 shapes: thresholdShapes,
               }}
               config={{ displayModeBar: false, responsive: true }}
@@ -229,8 +294,8 @@ export const ThresholdExplorerCard = ({ batchResult, resolveLabel }: ThresholdEx
                   ]}
                   layout={{
                     ...BASE_LAYOUT,
-                    xaxis: { title: { text: "Threshold" }, range: [sliderMin, sliderMax] },
-                    yaxis: { title: { text: "Error rate" }, range: [-0.03, 1.03] },
+                    xaxis: { title: { text: "Threshold" }, ...sharedXAxis },
+                    yaxis: { title: { text: "Error rate" }, range: [-0.03, 1.03], automargin: false },
                     shapes: [verticalLine(whatIf, "solid", LINE_COLOR)],
                   }}
                   config={{ displayModeBar: false, responsive: true }}
@@ -241,10 +306,21 @@ export const ThresholdExplorerCard = ({ batchResult, resolveLabel }: ThresholdEx
             </div>
 
             <div className="grid grid-cols-2 gap-1 text-muted-foreground" data-testid="threshold-stats">
-              <span>
+              <span className="font-medium text-foreground">
+                Balanced accuracy: {formatPercent(metrics.balancedAccuracy)}
+              </span>
+              <span className="flex items-center gap-1">
+                Accuracy: {formatPercent(metrics.accuracy)}
+                <InfoTooltip title="Accuracy">
+                  <p>
+                    Share of all pairs decided correctly. Most pairs are different-speaker pairs, so rejecting
+                    everything still scores high. Balanced accuracy weights both kinds of pair equally.
+                  </p>
+                </InfoTooltip>
+              </span>
+              <span className="col-span-2">
                 Accepted pairs: {formatCount(metrics.accepted)} of {formatCount(metrics.totalPairs)}
               </span>
-              <span>Accuracy: {formatPercent(metrics.accuracy)}</span>
               <span className="flex items-center gap-1">
                 False accepts: {formatCount(metrics.falseAccepts ?? 0)} (FAR {formatPercent(metrics.far)})
                 <InfoTooltip title="FAR (false accept rate)">
@@ -269,6 +345,10 @@ export const ThresholdExplorerCard = ({ batchResult, resolveLabel }: ThresholdEx
                 </InfoTooltip>
               </span>
             </div>
+            <p className="text-[10px] text-muted-foreground" data-testid="class-counts">
+              {formatCount(metrics.samePairs ?? 0)} same-speaker pairs · {formatCount(metrics.differentPairs ?? 0)}{" "}
+              different-speaker pairs
+            </p>
           </>
         ) : (
           <>

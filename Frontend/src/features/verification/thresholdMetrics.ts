@@ -22,6 +22,8 @@ export interface ThresholdMetrics {
   far: number | null;
   frr: number | null;
   accuracy: number | null;
+  /** Mean of the two per-class correct rates; null if either rate is null. */
+  balancedAccuracy: number | null;
 }
 
 export interface ErrorCurvePoint {
@@ -93,8 +95,11 @@ export function metricsAt(pairs: ScoredPair[], threshold: number): ThresholdMetr
       far: null,
       frr: null,
       accuracy: null,
+      balancedAccuracy: null,
     };
   }
+  const far = differentPairs > 0 ? falseAccepts / differentPairs : null;
+  const frr = samePairs > 0 ? falseRejects / samePairs : null;
   return {
     threshold,
     totalPairs: pairs.length,
@@ -103,9 +108,10 @@ export function metricsAt(pairs: ScoredPair[], threshold: number): ThresholdMetr
     differentPairs,
     falseAccepts,
     falseRejects,
-    far: differentPairs > 0 ? falseAccepts / differentPairs : null,
-    frr: samePairs > 0 ? falseRejects / samePairs : null,
+    far,
+    frr,
     accuracy: (labelled - falseAccepts - falseRejects) / labelled,
+    balancedAccuracy: far !== null && frr !== null ? (1 - far + (1 - frr)) / 2 : null,
   };
 }
 

@@ -120,7 +120,11 @@ describe("ThresholdExplorerCard", () => {
     expect(stats).toHaveTextContent("False accepts: 1 (FAR 33.3%)");
     expect(stats).toHaveTextContent("False rejects: 1 (FRR 33.3%)");
     expect(stats).toHaveTextContent("Accuracy: 66.7%");
+    expect(stats).toHaveTextContent("Balanced accuracy: 66.7%");
+    // Balanced accuracy is the primary stat, so it comes first.
+    expect(stats.textContent?.startsWith("Balanced accuracy")).toBe(true);
     expect(stats).toHaveTextContent("EER 33.3% at threshold 0.6000");
+    expect(screen.getByTestId("class-counts")).toHaveTextContent("3 same-speaker pairs · 3 different-speaker pairs");
 
     expect(screen.getByTestId("changed-pairs")).toHaveTextContent("No decisions change");
     expect(screen.queryByText(/Error rates need known speaker groups/)).not.toBeInTheDocument();
@@ -198,9 +202,32 @@ describe("ThresholdExplorerCard", () => {
     expect(changed).toHaveTextContent("Showing 10 of 14 changed pairs.");
   });
 
-  it("Reset to calibrated restores the calibrated value", () => {
+  it("shares one fixed x range and the same plot margins between the slider and both charts", () => {
     render(<ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveLabel} />);
-    const reset = screen.getByRole("button", { name: "Reset to calibrated" });
+    moveSlider(0.3);
+
+    const histogram = lastPlotNamed("Same speaker").layout;
+    const errorRates = lastPlotNamed("FAR").layout;
+    for (const layout of [histogram, errorRates]) {
+      expect(layout.xaxis.range).toEqual([Number(slider().min), Number(slider().max)]);
+      expect(layout.xaxis.autorange).toBe(false);
+      expect(layout.autosize).toBe(true);
+      expect(layout.margin).toMatchObject({ l: 56, r: 16 });
+    }
+
+    // The slider row holds only the slider, padded to the plot margins.
+    const sliderRow = screen.getByTestId("threshold-slider-row");
+    expect(sliderRow).toHaveStyle({ paddingLeft: "56px", paddingRight: "16px" });
+    expect(sliderRow.children).toHaveLength(1);
+    expect(sliderRow.firstElementChild).toBe(slider());
+    expect(within(sliderRow).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("Reset to calibrated sits in the top row and restores the calibrated value", () => {
+    render(<ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveLabel} />);
+    const headerRow = screen.getByTestId("threshold-header-row");
+    const reset = within(headerRow).getByRole("button", { name: "Reset to calibrated" });
+    expect(headerRow).toContainElement(screen.getByTestId("calibrated-threshold"));
     expect(reset).toBeDisabled();
 
     moveSlider(0.3);
@@ -242,6 +269,8 @@ describe("ThresholdExplorerCard", () => {
 
     const stats = screen.getByTestId("threshold-stats");
     expect(stats).toHaveTextContent("FAR n/a");
+    expect(stats).toHaveTextContent("Balanced accuracy: n/a");
+    expect(screen.getByTestId("class-counts")).toHaveTextContent("6 same-speaker pairs · 0 different-speaker pairs");
     expect(stats).toHaveTextContent("EER: n/a");
     expect(stats).not.toHaveTextContent("NaN");
   });
