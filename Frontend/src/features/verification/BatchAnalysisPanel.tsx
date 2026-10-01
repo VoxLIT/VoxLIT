@@ -453,14 +453,12 @@ export const BatchAnalysisPanel = ({
 
       {batchResult && (
         <>
-          {pairSelection && pairSelection.length === 2 && (
-            <PairComparisonCard
-              selectedLabels={pairSelection}
-              batchResult={batchResult}
-              labelToIndex={labelToIndex}
-              resolveLabel={resolveRecordingLabel}
-            />
-          )}
+          <PairComparisonCard
+            selectedLabels={pairSelection}
+            batchResult={batchResult}
+            labelToIndex={labelToIndex}
+            resolveLabel={resolveRecordingLabel}
+          />
           <ClusterSummaryList
             clusterSummaries={batchResult.cluster_summaries}
             clusterColorMap={clusterColorMap}
