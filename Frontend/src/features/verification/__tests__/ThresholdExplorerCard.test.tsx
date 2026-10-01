@@ -317,4 +317,153 @@ describe("ThresholdExplorerCard", () => {
     expect(JSON.stringify(frozen)).toBe(before);
     expect(frozen.threshold).toBe(CALIBRATED);
   });
+
+  describe("Selection mode", () => {
+    const HINT = "Tip: use Box or Lasso on the embedding plot to analyse a group of clips.";
+    const toggle = (name: "All pairs" | "Selection") => screen.queryByRole("button", { name });
+
+    it("shows the toggle only for three or more selected indices", () => {
+      const { rerender } = render(<ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveLabel} />);
+      expect(toggle("Selection")).not.toBeInTheDocument();
+      expect(toggle("All pairs")).not.toBeInTheDocument();
+      expect(screen.getByTestId("selection-hint")).toHaveTextContent(HINT);
+
+      rerender(<ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveLabel} selectedIndices={[0, 3]} />);
+      expect(toggle("Selection")).not.toBeInTheDocument();
+      expect(screen.getByTestId("threshold-stats")).toHaveTextContent("Accepted pairs: 3 of 6");
+
+      rerender(
+        <ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveLabel} selectedIndices={[0, 1, 3]} />
+      );
+      expect(toggle("All pairs")).toHaveAttribute("aria-pressed", "false");
+      expect(toggle("Selection")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.queryByTestId("selection-hint")).not.toBeInTheDocument();
+    });
+
+    it("uses only the selected pairs for the charts, stats, EER and changed pairs", () => {
+      // a, b, d -> a/b 0.9 (same), a/d 0.6 and b/d 0.2 (different).
+      render(<ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveLabel} selectedIndices={[3, 0, 1]} />);
+
+      expect(screen.getByTestId("selection-note")).toHaveTextContent(
+        "Selection: 3 clips · 3 pairs (1 same-speaker · 2 different-speaker)"
+      );
+      const stats = screen.getByTestId("threshold-stats");
+      expect(stats).toHaveTextContent("Accepted pairs: 2 of 3");
+      expect(stats).toHaveTextContent("False accepts: 1 (FAR 50.0%)");
+      expect(stats).toHaveTextContent("False rejects: 0 (FRR 0.0%)");
+      expect(stats).toHaveTextContent("Balanced accuracy: 75.0%");
+      expect(stats).toHaveTextContent("EER 0.0% at threshold 0.9000");
+      expect(screen.getByTestId("class-counts")).toHaveTextContent("1 same-speaker pairs · 2 different-speaker pairs");
+
+      const histogram = lastPlotNamed("Same speaker");
+      expect(histogram.data.find((trace) => trace.name === "Same speaker")?.x).toEqual([0.9]);
+      expect(histogram.data.find((trace) => trace.name === "Different speaker")?.x).toEqual([0.6, 0.2]);
+      expect(lastPlotNamed("FAR").data.find((trace) => trace.name === "EER")?.x).toEqual([0.9]);
+
+      // Raising the threshold flips a/d only; a/c (0.8) is outside the selection.
+      moveSlider(0.85);
+      const changed = screen.getByTestId("changed-pairs");
+      expect(within(changed).getAllByRole("listitem")).toHaveLength(1);
+      expect(changed).toHaveTextContent("a.wav ↔ d.wav");
+      expect(changed).not.toHaveTextContent("c.wav");
+    });
+
+    it("keeps the slider value and the shared x range when switching modes", () => {
+      render(<ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveLabel} selectedIndices={[1, 2, 3]} />);
+      moveSlider(0.3);
+
+      // b, c, d only span 0.1-0.4, yet the range still covers the whole batch.
+      expect(slider().min).toBe("0.1");
+      expect(slider().max).toBe("0.9");
+      expect(lastPlotNamed("Same speaker").layout.xaxis.range).toEqual([0.1, 0.9]);
+      expect(lastPlotNamed("FAR").layout.xaxis.range).toEqual([0.1, 0.9]);
+      expect(screen.getByTestId("threshold-stats")).toHaveTextContent("Accepted pairs: 1 of 3");
+
+      fireEvent.click(toggle("All pairs") as HTMLElement);
+
+      expect(slider().value).toBe("0.3");
+      expect(slider().min).toBe("0.1");
+      expect(slider().max).toBe("0.9");
+      expect(lastPlotNamed("Same speaker").layout.xaxis.range).toEqual([0.1, 0.9]);
+      expect(screen.getByTestId("threshold-stats")).toHaveTextContent("Accepted pairs: 4 of 6");
+      expect(screen.queryByTestId("selection-note")).not.toBeInTheDocument();
+      expect(screen.getByTestId("selection-hint")).toHaveTextContent(HINT);
+
+      fireEvent.click(toggle("Selection") as HTMLElement);
+      expect(slider().value).toBe("0.3");
+      expect(screen.getByTestId("threshold-stats")).toHaveTextContent("Accepted pairs: 1 of 3");
+    });
+
+    it("warns about a small selection", () => {
+      render(<ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveLabel} selectedIndices={[0, 1, 3]} />);
+
+      expect(screen.getByTestId("selection-warning")).toHaveTextContent(
+        "Small selection: rates are based on few pairs and can swing a lot."
+      );
+
+      // The warning belongs to the selection, not to the whole batch.
+      fireEvent.click(toggle("All pairs") as HTMLElement);
+      expect(screen.queryByTestId("selection-warning")).not.toBeInTheDocument();
+    });
+
+    it("shows n/a rates and a warning when the selection has only one class", () => {
+      // a, b, c are all speaker A: three same-speaker pairs, no different-speaker pair.
+      render(<ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveLabel} selectedIndices={[0, 1, 2]} />);
+
+      expect(screen.getByTestId("selection-note")).toHaveTextContent(
+        "Selection: 3 clips · 3 pairs (3 same-speaker · 0 different-speaker)"
+      );
+      expect(screen.getByTestId("selection-warning")).toHaveTextContent(
+        "This selection has no same-speaker (or no different-speaker) pairs, so error rates can't be computed."
+      );
+      const stats = screen.getByTestId("threshold-stats");
+      expect(stats).toHaveTextContent("FAR n/a");
+      expect(stats).toHaveTextContent("FRR n/a");
+      expect(stats).toHaveTextContent("Balanced accuracy: n/a");
+      expect(stats).toHaveTextContent("EER: n/a");
+      expect(stats).toHaveTextContent("Accepted pairs: 2 of 3");
+      expect(stats).not.toHaveTextContent("NaN");
+    });
+
+    it("defaults to Selection for each new selection and falls back to All pairs when it clears", () => {
+      const { rerender } = render(
+        <ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveLabel} selectedIndices={[0, 1, 3]} />
+      );
+      fireEvent.click(toggle("All pairs") as HTMLElement);
+      expect(screen.getByTestId("threshold-stats")).toHaveTextContent("Accepted pairs: 3 of 6");
+
+      // An equal selection in a new array is not a new selection.
+      rerender(
+        <ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveLabel} selectedIndices={[0, 1, 3]} />
+      );
+      expect(toggle("All pairs")).toHaveAttribute("aria-pressed", "true");
+
+      rerender(
+        <ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveLabel} selectedIndices={[1, 2, 3]} />
+      );
+      expect(toggle("Selection")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("selection-note")).toHaveTextContent("Selection: 3 clips · 3 pairs");
+
+      rerender(<ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveLabel} selectedIndices={undefined} />);
+      expect(toggle("Selection")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("selection-note")).not.toBeInTheDocument();
+      expect(screen.getByTestId("threshold-stats")).toHaveTextContent("Accepted pairs: 3 of 6");
+      expect(screen.getByTestId("selection-hint")).toHaveTextContent(HINT);
+    });
+
+    it("works without ground truth for the histogram and accepted-pair count", () => {
+      render(<ThresholdExplorerCard batchResult={noGroundTruth} resolveLabel={resolveLabel} selectedIndices={[0, 1, 3]} />);
+
+      expect(screen.getByTestId("selection-note")).toHaveTextContent("Selection: 3 clips · 3 pairs");
+      expect(screen.getByTestId("selection-note")).not.toHaveTextContent("same-speaker");
+      expect(screen.queryByTestId("selection-warning")).not.toBeInTheDocument();
+      expect(screen.getAllByTestId("plot")).toHaveLength(1);
+      expect(plotProps[plotProps.length - 1].data[0].x).toEqual([0.9, 0.6, 0.2]);
+      expect(screen.getByTestId("threshold-stats")).toHaveTextContent("Accepted pairs: 2 of 3");
+      expect(screen.queryByTestId("changed-pairs")).not.toBeInTheDocument();
+
+      moveSlider(0.7);
+      expect(screen.getByTestId("threshold-stats")).toHaveTextContent("Accepted pairs: 1 of 3");
+    });
+  });
 });

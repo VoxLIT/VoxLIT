@@ -403,7 +403,19 @@ export const BatchAnalysisPanel = ({
     return () => onLabelResolverChange(null);
   }, [batchResult, labelToFileId, onLabelResolverChange]);
 
-  const labelToIndex = new Map((batchResult?.labels ?? []).map((label, i) => [label, i]));
+  const labelToIndex = useMemo(
+    () => new Map((batchResult?.labels ?? []).map((label, i) => [label, i])),
+    [batchResult]
+  );
+  // A box/lasso group (3+ points) drives the Threshold explorer's Selection
+  // mode instead of the Pair Comparison card. Labels not in the batch are ignored.
+  const isGroupSelection = pairSelection.length >= 3;
+  const selectedIndices = useMemo(() => {
+    if (pairSelection.length < 3) return undefined;
+    return pairSelection
+      .map((label) => labelToIndex.get(label))
+      .filter((index): index is number => index !== undefined);
+  }, [pairSelection, labelToIndex]);
   const clusterColorMap = useMemo(
     () => (batchResult ? buildClusterColorMap(batchResult.cluster_labels) : {}),
     [batchResult]
@@ -454,12 +466,14 @@ export const BatchAnalysisPanel = ({
 
       {batchResult && (
         <>
-          <PairComparisonCard
-            selectedLabels={pairSelection}
-            batchResult={batchResult}
-            labelToIndex={labelToIndex}
-            resolveLabel={resolveRecordingLabel}
-          />
+          {!isGroupSelection && (
+            <PairComparisonCard
+              selectedLabels={pairSelection}
+              batchResult={batchResult}
+              labelToIndex={labelToIndex}
+              resolveLabel={resolveRecordingLabel}
+            />
+          )}
           <ClusterSummaryList
             clusterSummaries={batchResult.cluster_summaries}
             clusterColorMap={clusterColorMap}
@@ -467,7 +481,11 @@ export const BatchAnalysisPanel = ({
             onClusterFocusChange={setFocusedClusterId}
             resolveLabel={resolveRecordingLabel}
           />
-          <ThresholdExplorerCard batchResult={batchResult} resolveLabel={resolveRecordingLabel} />
+          <ThresholdExplorerCard
+            batchResult={batchResult}
+            resolveLabel={resolveRecordingLabel}
+            selectedIndices={selectedIndices}
+          />
         </>
       )}
     </div>

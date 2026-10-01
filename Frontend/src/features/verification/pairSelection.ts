@@ -11,13 +11,15 @@
  *    - Appends the new clip, activating pair comparison once length reaches 2 (e.g. [A] -> [A, B]).
  * 3. If clicking a new clip when 2 clips are already selected:
  *    - Sliding window: drops the oldest clip and pairs the previous clip with the new one (e.g. [A, B] + C -> [B, C]).
+ * 4. If 3 or more clips are selected (a box/lasso group selection):
+ *    - Any click starts a fresh selection containing ONLY the clicked clip.
  */
 export function getNextVerificationPairSelection(
   prevSelection: string[] | undefined,
   clickedFilename: string
 ): string[] {
   const prev = prevSelection ?? [];
-  if (prev.includes(clickedFilename)) {
+  if (prev.length > 2 || prev.includes(clickedFilename)) {
     return [clickedFilename];
   }
   if (prev.length < 2) {

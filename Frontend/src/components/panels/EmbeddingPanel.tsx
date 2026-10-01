@@ -253,7 +253,7 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
 
   const handleAngleRangeSelect = (selectedFiles: string[]) => {
     if (verificationMode) {
-      onPairSelectionChange?.(selectedFiles.slice(0, 2));
+      onPairSelectionChange?.(selectedFiles);
       return;
     }
     // Only update if the selection has actually changed
@@ -281,7 +281,7 @@ export const EmbeddingPanel = ({ model = "whisper-base", dataset = "common-voice
 
   const handle2DSelectionChange = (selectedFiles: string[]) => {
     if (verificationMode) {
-      onPairSelectionChange?.(selectedFiles.slice(0, 2));
+      onPairSelectionChange?.(selectedFiles);
       return;
     }
     // Only update if the selection has actually changed

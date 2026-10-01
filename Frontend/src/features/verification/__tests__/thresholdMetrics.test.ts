@@ -52,6 +52,18 @@ describe("buildPairs", () => {
     ).toBe(true);
   });
 
+  it("keeps only pairs with both recordings in the index filter", () => {
+    const pairs = buildPairs(labelled, new Set([0, 2, 3]));
+
+    expect(pairs.map((p) => `${p.i}-${p.j}`)).toEqual(["0-2", "0-3", "2-3"]);
+    expect(pairs.map((p) => p.similarity)).toEqual([0.8, 0.6, 0.1]);
+    expect(pairs.map((p) => p.sameSpeaker)).toEqual([true, false, false]);
+    // Order and duplicates in the filter do not matter; unknown indices are ignored.
+    expect(buildPairs(labelled, [3, 0, 0, 9]).map((p) => `${p.i}-${p.j}`)).toEqual(["0-3"]);
+    expect(buildPairs(labelled, [1])).toEqual([]);
+    expect(buildPairs(labelled, [])).toEqual([]);
+  });
+
   it("returns no pairs for fewer than two recordings", () => {
     expect(buildPairs({ similarity_matrix: [[1]], ground_truth_groups: ["A"], ground_truth_available: true })).toEqual(
       []

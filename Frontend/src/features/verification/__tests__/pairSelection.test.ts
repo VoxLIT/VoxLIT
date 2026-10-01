@@ -36,6 +36,15 @@ describe("getNextVerificationPairSelection", () => {
     expect(result).toEqual(["clip_b", "clip_c"]);
   });
 
+  it("starts a fresh single-clip selection when clicking while 3+ clips are selected", () => {
+    // A box/lasso group selection is replaced by the clicked clip, whether or
+    // not that clip was part of the group.
+    const group = ["clip_a", "clip_b", "clip_c", "clip_d"];
+    expect(getNextVerificationPairSelection(group, "clip_e")).toEqual(["clip_e"]);
+    expect(getNextVerificationPairSelection(group, "clip_c")).toEqual(["clip_c"]);
+    expect(getNextVerificationPairSelection(["clip_a", "clip_b", "clip_c"], "clip_d")).toEqual(["clip_d"]);
+  });
+
   it("retains single clip when clicking the same single clip again", () => {
     const result = getNextVerificationPairSelection(["clip_b"], "clip_b");
     expect(result).toEqual(["clip_b"]);

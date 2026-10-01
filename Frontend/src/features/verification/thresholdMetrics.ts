@@ -48,15 +48,19 @@ type PairSource = Pick<BatchAnalysisResponse, "similarity_matrix" | "ground_trut
 
 export const isAccepted = (similarity: number, threshold: number) => similarity >= threshold;
 
-export function buildPairs(result: PairSource): ScoredPair[] {
+/** With `indices`, only pairs whose two recordings are both in that set are kept. */
+export function buildPairs(result: PairSource, indices?: Iterable<number>): ScoredPair[] {
   const matrix = result.similarity_matrix;
+  const keep = indices ? new Set(indices) : null;
   const groups =
     result.ground_truth_available && result.ground_truth_groups?.length === matrix.length
       ? result.ground_truth_groups
       : null;
   const pairs: ScoredPair[] = [];
   for (let i = 0; i < matrix.length; i += 1) {
+    if (keep && !keep.has(i)) continue;
     for (let j = i + 1; j < matrix.length; j += 1) {
+      if (keep && !keep.has(j)) continue;
       const similarity = matrix[i]?.[j];
       if (typeof similarity !== "number" || !Number.isFinite(similarity)) continue;
       pairs.push({ i, j, similarity, sameSpeaker: groups ? groups[i] === groups[j] : null });

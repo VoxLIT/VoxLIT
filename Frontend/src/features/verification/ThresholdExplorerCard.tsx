@@ -18,7 +18,13 @@ import {
 interface ThresholdExplorerCardProps {
   batchResult: BatchAnalysisResponse;
   resolveLabel?: (id: string) => string;
+  /** Batch indices of a box/lasso group on the embedding plot. Three or more
+   *  enable Selection mode; anything else leaves the card on All pairs. */
+  selectedIndices?: number[];
 }
+
+const MIN_SELECTION_SIZE = 3;
+const SMALL_CLASS_PAIRS = 10;
 
 const SAME_COLOR = "#10b981"; // emerald-500
 const DIFFERENT_COLOR = "#f43f5e"; // rose-500
@@ -114,7 +120,7 @@ const BASE_LAYOUT = {
  * the batch result; the slider never changes the result, its decisions, the
  * clustering or any other card.
  */
-export const ThresholdExplorerCard = ({ batchResult, resolveLabel }: ThresholdExplorerCardProps) => {
+export const ThresholdExplorerCard = ({ batchResult, resolveLabel, selectedIndices }: ThresholdExplorerCardProps) => {
   const resolve = resolveLabel ?? ((id: string) => id);
   const calibrated = batchResult.threshold;
   const [whatIf, setWhatIf] = useState(calibrated);
@@ -124,16 +130,54 @@ export const ThresholdExplorerCard = ({ batchResult, resolveLabel }: ThresholdEx
     setWhatIf(batchResult.threshold);
   }, [batchResult]);
 
-  const pairs = useMemo(() => buildPairs(batchResult), [batchResult]);
-  const hasGroundTruth = useMemo(() => pairs.some((pair) => pair.sameSpeaker !== null), [pairs]);
-  const curve = useMemo(() => (hasGroundTruth ? errorCurve(pairs, CURVE_STEPS) : []), [pairs, hasGroundTruth]);
-  const eer = useMemo(() => (hasGroundTruth ? equalErrorRate(pairs) : null), [pairs, hasGroundTruth]);
-  const metrics = useMemo(() => metricsAt(pairs, whatIf), [pairs, whatIf]);
+  // Unique, in-range, sorted selection as a string, so a re-rendered parent
+  // handing over an equal array is not treated as a new selection.
+  const recordingCount = batchResult.similarity_matrix.length;
+  const selectionKey = useMemo(() => {
+    const valid = new Set(
+      (selectedIndices ?? []).filter((index) => Number.isInteger(index) && index >= 0 && index < recordingCount)
+    );
+    return valid.size >= MIN_SELECTION_SIZE ? [...valid].sort((a, b) => a - b).join(",") : "";
+  }, [selectedIndices, recordingCount]);
+  const selection = useMemo(() => (selectionKey ? selectionKey.split(",").map(Number) : []), [selectionKey]);
+  const hasSelection = selection.length > 0;
+
+  // A new selection switches to Selection; clearing it falls back to All pairs.
+  const [mode, setMode] = useState<"all" | "selection">(hasSelection ? "selection" : "all");
+  useEffect(() => {
+    setMode(selectionKey ? "selection" : "all");
+  }, [selectionKey]);
+  const selectionMode = hasSelection && mode === "selection";
+
+  const allPairs = useMemo(() => buildPairs(batchResult), [batchResult]);
+  const selectedPairs = useMemo(() => buildPairs(batchResult, selection), [batchResult, selection]);
+  const pairs = selectionMode ? selectedPairs : allPairs;
+  const hasGroundTruth = useMemo(() => allPairs.some((pair) => pair.sameSpeaker !== null), [allPairs]);
+  const rawMetrics = useMemo(() => metricsAt(pairs, whatIf), [pairs, whatIf]);
   const changed = useMemo(() => changedPairs(pairs, calibrated, whatIf), [pairs, calibrated, whatIf]);
 
+  // Selection-only warnings. A selection missing one class reports no rates at all.
+  const sameCount = rawMetrics.samePairs ?? 0;
+  const differentCount = rawMetrics.differentPairs ?? 0;
+  const singleClass = selectionMode && hasGroundTruth && (sameCount === 0 || differentCount === 0);
+  const smallSelection =
+    selectionMode &&
+    hasGroundTruth &&
+    !singleClass &&
+    (sameCount < SMALL_CLASS_PAIRS || differentCount < SMALL_CLASS_PAIRS);
+  const metrics = singleClass
+    ? { ...rawMetrics, far: null, frr: null, accuracy: null, balancedAccuracy: null }
+    : rawMetrics;
+  const curve = useMemo(
+    () => (hasGroundTruth && !singleClass ? errorCurve(pairs, CURVE_STEPS) : []),
+    [pairs, hasGroundTruth, singleClass]
+  );
+  const eer = useMemo(() => (hasGroundTruth ? equalErrorRate(pairs) : null), [pairs, hasGroundTruth]);
+
   // Slider bounds snap outward to the step grid, and always include the
-  // calibrated threshold so the slider can start (and reset) there.
-  const range = similarityRange(pairs) ?? { min: calibrated, max: calibrated };
+  // calibrated threshold so the slider can start (and reset) there. They come
+  // from every pair in the batch, so switching modes never moves the x range.
+  const range = similarityRange(allPairs) ?? { min: calibrated, max: calibrated };
   const toSteps = (value: number) => Number((value / SLIDER_STEP).toFixed(6));
   const sliderMin = Number((Math.floor(toSteps(Math.min(range.min, calibrated))) * SLIDER_STEP).toFixed(2));
   const sliderMax = Number((Math.ceil(toSteps(Math.max(range.max, calibrated))) * SLIDER_STEP).toFixed(2));
@@ -166,7 +210,7 @@ export const ThresholdExplorerCard = ({ batchResult, resolveLabel }: ThresholdEx
       ]
     : [
         histogram(
-          "All pairs",
+          selectionMode ? "Selected pairs" : "All pairs",
           pairs.map((pair) => pair.similarity),
           NEUTRAL_COLOR
         ),
@@ -189,6 +233,50 @@ export const ThresholdExplorerCard = ({ batchResult, resolveLabel }: ThresholdEx
       </CardHeader>
       <CardContent className="space-y-3 text-xs">
         <style>{SLIDER_CSS}</style>
+        {hasSelection && (
+          <div className="flex items-center gap-1" role="group" aria-label="Pairs to analyse">
+            <Button
+              size="sm"
+              variant={selectionMode ? "outline" : "default"}
+              aria-pressed={!selectionMode}
+              onClick={() => setMode("all")}
+            >
+              All pairs
+            </Button>
+            <Button
+              size="sm"
+              variant={selectionMode ? "default" : "outline"}
+              aria-pressed={selectionMode}
+              onClick={() => setMode("selection")}
+            >
+              Selection
+            </Button>
+          </div>
+        )}
+        {selectionMode ? (
+          <div className="space-y-1">
+            <p className="font-medium" data-testid="selection-note">
+              Selection: {formatCount(selection.length)} clips · {formatCount(pairs.length)} pairs
+              {hasGroundTruth &&
+                ` (${formatCount(sameCount)} same-speaker · ${formatCount(differentCount)} different-speaker)`}
+            </p>
+            {smallSelection && (
+              <p className="text-amber-700" data-testid="selection-warning">
+                Small selection: rates are based on few pairs and can swing a lot.
+              </p>
+            )}
+            {singleClass && (
+              <p className="text-amber-700" data-testid="selection-warning">
+                This selection has no same-speaker (or no different-speaker) pairs, so error rates can&apos;t be
+                computed.
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-muted-foreground" data-testid="selection-hint">
+            Tip: use Box or Lasso on the embedding plot to analyse a group of clips.
+          </p>
+        )}
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2" data-testid="threshold-header-row">
             <span className="flex items-center gap-1 text-muted-foreground">
