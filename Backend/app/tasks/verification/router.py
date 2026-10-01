@@ -743,6 +743,8 @@ async def run_saliency_map(
     reference_recording_ids: list[str] = Form(default_factory=list),
     target_recording_id: str | None = Form(None),
     cluster_id: str | None = Form(None),
+    occlusion_axis: str = Form("time"),
+    band_count: int = Form(8),
 ):
     """Generalized saliency map, generalizing `/explain/temporal-occlusion`
     with a `reference_type`:
@@ -757,12 +759,27 @@ async def run_saliency_map(
 
     `/explain/temporal-occlusion` is untouched and keeps serving the raw-file
     -upload Pair Verification flow unchanged.
+
+    `occlusion_axis` picks what is silenced: "time" (default, `segment_count`
+    time segments) or "frequency" (`band_count` mel-spaced frequency bands).
     """
 
     if reference_type not in ("cluster", "enrollment"):
         raise HTTPException(status_code=422, detail="reference_type must be 'cluster' or 'enrollment'.")
     if not 4 <= segment_count <= 20:
         raise HTTPException(status_code=422, detail="Choose between 4 and 20 occlusion segments.")
+    if occlusion_axis not in ("time", "frequency"):
+        raise HTTPException(status_code=422, detail="occlusion_axis must be 'time' or 'frequency'.")
+    if not 4 <= band_count <= 12:
+        raise HTTPException(status_code=422, detail="Choose between 4 and 12 frequency bands.")
+
+    # Only frequency requests carry the new arguments, so a time request
+    # reaches compute_saliency_map exactly as it did before.
+    axis_kwargs = (
+        {"occlusion_axis": occlusion_axis, "band_count": band_count}
+        if occlusion_axis == "frequency"
+        else {}
+    )
 
     # Strict mutual exclusivity -- fields belonging to the other mode are
     # rejected outright, never silently ignored.
@@ -812,6 +829,7 @@ async def run_saliency_map(
                 cluster_id=response_cluster_id,
                 target_recording_id=response_target_id,
                 segment_count=segment_count,
+                **axis_kwargs,
             )
     except HTTPException:
         raise

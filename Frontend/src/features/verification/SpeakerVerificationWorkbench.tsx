@@ -12,7 +12,13 @@ import { ClusterSaliencyTab } from "./ClusterSaliencyTab";
 import { SpeakerSaliencyMap } from "./SpeakerSaliencyMap";
 import { buildClusterColorMap } from "./clusterColors";
 import type { BatchAnalysisResponse } from "./batchTypes";
-import type { SaliencyMapResponse } from "./saliencyTypes";
+import {
+  DEFAULT_SALIENCY_BAND_COUNT,
+  EMPTY_SALIENCY_RESULTS,
+  type AnySaliencyMapResponse,
+  type SaliencyAxis,
+  type SaliencyResultsByAxis,
+} from "./saliencyTypes";
 import { PerturbationTools, type VerificationPerturbationContext } from "@/components/analysis/PerturbationTools";
 import { clusterMapStore } from "./clusterMapStore";
 import { useEmbedding } from "@/contexts/EmbeddingContext";
@@ -25,6 +31,11 @@ interface RequestKey {
   enrollmentKey: string;
   probeId: string;
 }
+
+type SaliencyRequestKey = RequestKey & { segmentCount: number };
+
+// One entry per occlusion axis, so switching axis never refetches.
+const EMPTY_SALIENCY_KEYS: Record<SaliencyAxis, SaliencyRequestKey | null> = { time: null, frequency: null };
 
 function keysEqual(a: RequestKey | null, b: RequestKey | null): boolean {
   if (a === null || a === undefined || b === null || b === undefined) return false;
@@ -105,14 +116,14 @@ export const SpeakerVerificationWorkbench = ({
   const probeInputRef = useRef<HTMLInputElement | null>(null);
 
   // Saliency
-  const [saliencyResult, setSaliencyResult] = useState<SaliencyMapResponse | null>(null);
+  const [saliencyAxis, setSaliencyAxis] = useState<SaliencyAxis>("time");
+  const [saliencyResults, setSaliencyResults] = useState<SaliencyResultsByAxis>(EMPTY_SALIENCY_RESULTS);
   const [saliencyError, setSaliencyError] = useState<string | null>(null);
   const [isSaliencyLoading, setIsSaliencyLoading] = useState(false);
   const [saliencySegmentCount, setSaliencySegmentCount] = useState(DEFAULT_SALIENCY_SEGMENT_COUNT);
   const [resultGeneratedFor, setResultGeneratedFor] = useState<RequestKey | null>(null);
-  const [saliencyGeneratedFor, setSaliencyGeneratedFor] = useState<(RequestKey & { segmentCount: number }) | null>(
-    null
-  );
+  const [saliencyGeneratedFor, setSaliencyGeneratedFor] = useState(EMPTY_SALIENCY_KEYS);
+  const saliencyResult: AnySaliencyMapResponse | null = saliencyResults[saliencyAxis];
 
   // Batch analysis context — forwarded to ClusterSaliencyTab
   const [batchResult, setBatchResult] = useState<BatchAnalysisResponse | null>(null);
@@ -149,7 +160,7 @@ export const SpeakerVerificationWorkbench = ({
   const deviceVerifyAbortRef = useRef<AbortController | null>(null);
   const deviceVerifyKeyRef = useRef<RequestKey | null>(null);
   const saliencyAbortRef = useRef<AbortController | null>(null);
-  const saliencyKeyRef = useRef<(RequestKey & { segmentCount: number }) | null>(null);
+  const saliencyKeyRef = useRef<SaliencyRequestKey | null>(null);
 
   // Resolve an opaque recording_id to a display label for Perturbation
   const resolveRecordingLabel = (id: string): string =>
@@ -171,8 +182,9 @@ export const SpeakerVerificationWorkbench = ({
     keysEqual(resultGeneratedFor, currentDeviceKey);
   const isSaliencyStale =
     saliencyResult !== null &&
-    (!keysEqual(saliencyGeneratedFor, currentDeviceKey) ||
-      saliencyGeneratedFor?.segmentCount !== saliencySegmentCount);
+    (!keysEqual(saliencyGeneratedFor[saliencyAxis], currentDeviceKey) ||
+      // Segment count only affects the time view.
+      (saliencyAxis === "time" && saliencyGeneratedFor.time?.segmentCount !== saliencySegmentCount));
 
   useEffect(() => {
     if (deviceVerifyAbortRef.current && !keysEqual(deviceVerifyKeyRef.current, currentDeviceKey)) {
@@ -197,9 +209,9 @@ export const SpeakerVerificationWorkbench = ({
     setResult(null);
     setResultGeneratedFor(null);
     setError(null);
-    setSaliencyResult(null);
+    setSaliencyResults(EMPTY_SALIENCY_RESULTS);
     setSaliencyError(null);
-    setSaliencyGeneratedFor(null);
+    setSaliencyGeneratedFor(EMPTY_SALIENCY_KEYS);
     saliencyKeyRef.current = null;
   }, [model]);
 
@@ -274,8 +286,8 @@ export const SpeakerVerificationWorkbench = ({
       setEnrollmentRefs((prev) => [...prev, ...newRefs]);
       setResult(null);
       setResultGeneratedFor(null);
-      setSaliencyResult(null);
-      setSaliencyGeneratedFor(null);
+      setSaliencyResults(EMPTY_SALIENCY_RESULTS);
+      setSaliencyGeneratedFor(EMPTY_SALIENCY_KEYS);
     }
 
     setError(messages.length > 0 ? messages.join(" ") : null);
@@ -295,8 +307,8 @@ export const SpeakerVerificationWorkbench = ({
     });
     setResult(null);
     setResultGeneratedFor(null);
-    setSaliencyResult(null);
-    setSaliencyGeneratedFor(null);
+    setSaliencyResults(EMPTY_SALIENCY_RESULTS);
+    setSaliencyGeneratedFor(EMPTY_SALIENCY_KEYS);
   };
 
   const handleClearEnrollment = () => {
@@ -307,8 +319,8 @@ export const SpeakerVerificationWorkbench = ({
     setEnrollmentRefs([]);
     setResult(null);
     setResultGeneratedFor(null);
-    setSaliencyResult(null);
-    setSaliencyGeneratedFor(null);
+    setSaliencyResults(EMPTY_SALIENCY_RESULTS);
+    setSaliencyGeneratedFor(EMPTY_SALIENCY_KEYS);
   };
 
   const handleProbeChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -340,8 +352,8 @@ export const SpeakerVerificationWorkbench = ({
 
     setResult(null);
     setResultGeneratedFor(null);
-    setSaliencyResult(null);
-    setSaliencyGeneratedFor(null);
+    setSaliencyResults(EMPTY_SALIENCY_RESULTS);
+    setSaliencyGeneratedFor(EMPTY_SALIENCY_KEYS);
     setError(null);
   };
 
@@ -355,8 +367,8 @@ export const SpeakerVerificationWorkbench = ({
     setProbeRef(null);
     setResult(null);
     setResultGeneratedFor(null);
-    setSaliencyResult(null);
-    setSaliencyGeneratedFor(null);
+    setSaliencyResults(EMPTY_SALIENCY_RESULTS);
+    setSaliencyGeneratedFor(EMPTY_SALIENCY_KEYS);
   };
 
   const projectPairEmbeddings = useCallback(
@@ -465,10 +477,10 @@ export const SpeakerVerificationWorkbench = ({
       const verifyResult = payload as VerificationResult;
       setResult(verifyResult);
       setResultGeneratedFor(requestKey);
-      if (saliencyGeneratedFor) {
-        setSaliencyResult(null);
+      if (saliencyGeneratedFor.time || saliencyGeneratedFor.frequency) {
+        setSaliencyResults(EMPTY_SALIENCY_RESULTS);
         setSaliencyError(null);
-        setSaliencyGeneratedFor(null);
+        setSaliencyGeneratedFor(EMPTY_SALIENCY_KEYS);
         saliencyKeyRef.current = null;
       }
 
@@ -540,6 +552,7 @@ export const SpeakerVerificationWorkbench = ({
     saliencyAbortRef.current = controller;
     const requestKey = { ...currentDeviceKey, segmentCount: saliencySegmentCount };
     saliencyKeyRef.current = requestKey;
+    const requestAxis = saliencyAxis;
 
     const formData = new FormData();
     formData.append("model", model);
@@ -547,10 +560,14 @@ export const SpeakerVerificationWorkbench = ({
     enrollmentRefs.forEach((ref) => formData.append("enrollment_files", ref.file));
     formData.append("probe_file", probeRef.file);
     formData.append("segment_count", String(saliencySegmentCount));
+    if (requestAxis === "frequency") {
+      formData.append("occlusion_axis", "frequency");
+      formData.append("band_count", String(DEFAULT_SALIENCY_BAND_COUNT));
+    }
 
     setIsSaliencyLoading(true);
     setSaliencyError(null);
-    setSaliencyResult(null);
+    setSaliencyResults((prev) => ({ ...prev, [requestAxis]: null }));
 
     try {
       const response = await fetch(`${API_BASE}/tasks/verification/explain/saliency`, {
@@ -564,8 +581,8 @@ export const SpeakerVerificationWorkbench = ({
         throw new Error(payload.detail || `Saliency map failed (${response.status}).`);
       }
       if (!keysEqual(requestKey, currentDeviceKeyRef.current)) return;
-      setSaliencyResult(payload as SaliencyMapResponse);
-      setSaliencyGeneratedFor(requestKey);
+      setSaliencyResults((prev) => ({ ...prev, [requestAxis]: payload }));
+      setSaliencyGeneratedFor((prev) => ({ ...prev, [requestAxis]: requestKey }));
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") return;
       setSaliencyError(caught instanceof Error ? caught.message : "Saliency map failed.");
@@ -880,7 +897,7 @@ export const SpeakerVerificationWorkbench = ({
                 </Card>
 
                 <SpeakerSaliencyMap
-                  title="Temporal occlusion saliency"
+                  title={saliencyAxis === "time" ? "Temporal occlusion saliency" : "Frequency-band occlusion saliency"}
                   audioUrl={probeRef?.previewUrl}
                   requireCredentials={false}
                   result={saliencyResult}
@@ -898,6 +915,8 @@ export const SpeakerVerificationWorkbench = ({
                   generateLabel="Generate saliency map"
                   segmentCount={saliencySegmentCount}
                   onSegmentCountChange={setSaliencySegmentCount}
+                  occlusionAxis={saliencyAxis}
+                  onOcclusionAxisChange={setSaliencyAxis}
                 />
               </div>
             )}

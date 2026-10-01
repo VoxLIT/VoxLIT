@@ -6,8 +6,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { WaveformViewer } from "@/components/audio/WaveformViewer";
-import type { SaliencyMapResponse, SaliencySegment } from "./saliencyTypes";
+import {
+  isFrequencySaliency,
+  type AnySaliencyMapResponse,
+  type SaliencyAxis,
+  type SaliencySegment,
+} from "./saliencyTypes";
 
 // A deliberately conservative *visualization* cutoff, not a claim about
 // measured embedding-extraction noise -- no such calibration exists yet, so
@@ -40,7 +46,9 @@ function intensityToColor(v: number): string {
 
 type SegmentClassification = "supports" | "opposes" | "minimal";
 
-function classifySegment(segment: SaliencySegment): SegmentClassification {
+function classifySegment(
+  segment: Pick<SaliencySegment, "influence_strength" | "similarity_change">
+): SegmentClassification {
   if (segment.influence_strength < MIN_DISPLAY_INFLUENCE_DELTA) return "minimal";
   return segment.similarity_change > 0 ? "supports" : "opposes";
 }
@@ -60,12 +68,14 @@ const CLASSIFICATION_UNDERLINE: Record<SegmentClassification, string> = {
 const formatScore = (value: number) => value.toFixed(4);
 const formatSigned = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(4)}`;
 const formatTime = (seconds: number) => `${seconds.toFixed(2)}s`;
+const formatHzRange = (lowHz: number, highHz: number) => `${Math.round(lowHz)}–${Math.round(highHz)} Hz`;
 
 export interface SpeakerSaliencyMapProps {
   title: string;
   audioUrl: string | undefined;
   requireCredentials: boolean;
-  result: SaliencyMapResponse | null;
+  /** The result for the currently selected occlusion axis. */
+  result: AnySaliencyMapResponse | null;
   isLoading: boolean;
   error: string | null;
   /** Non-null: the displayed result no longer matches the current
@@ -81,13 +91,17 @@ export interface SpeakerSaliencyMapProps {
   segmentCount: number;
   onSegmentCountChange: (segmentCount: number) => void;
   clusterBadge?: { label: string; color: string } | null;
+  /** Which occlusion view is shown. Uncontrolled (starting at "time") when
+   *  omitted. */
+  occlusionAxis?: SaliencyAxis;
+  onOcclusionAxisChange?: (axis: SaliencyAxis) => void;
 }
 
 export const SpeakerSaliencyMap = ({
   title,
   audioUrl,
   requireCredentials,
-  result,
+  result: axisResult,
   isLoading,
   error,
   staleReason,
@@ -97,9 +111,29 @@ export const SpeakerSaliencyMap = ({
   segmentCount,
   onSegmentCountChange,
   clusterBadge,
+  occlusionAxis,
+  onOcclusionAxisChange,
 }: SpeakerSaliencyMapProps) => {
   const wavesurferRef = useRef<WaveSurfer | null>(null);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [internalAxis, setInternalAxis] = useState<SaliencyAxis>("time");
+  const axis = occlusionAxis ?? internalAxis;
+
+  const handleAxisChange = (value: string) => {
+    // Radix emits "" when the active item is clicked again -- keep the axis.
+    if (value !== "time" && value !== "frequency") return;
+    setInternalAxis(value);
+    onOcclusionAxisChange?.(value);
+  };
+
+  // Each view only ever renders a result produced for its own axis.
+  const result = axis === "time" && axisResult && !isFrequencySaliency(axisResult) ? axisResult : null;
+  const frequencyResult = axis === "frequency" && isFrequencySaliency(axisResult) ? axisResult : null;
+
+  const maxBandInfluence = frequencyResult
+    ? Math.max(...frequencyResult.bands.map((band) => band.influence_strength), 0)
+    : 0;
+  const isBandResultBelowDisplayThreshold = maxBandInfluence < MIN_DISPLAY_INFLUENCE_DELTA;
 
   const maxInfluence = useMemo(
     () => (result ? Math.max(...result.segments.map((s) => s.influence_strength), 0) : 0),
@@ -221,19 +255,38 @@ export const SpeakerSaliencyMap = ({
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex min-w-[10rem] flex-1 items-center gap-2 text-xs text-muted-foreground">
-                <span className="whitespace-nowrap">Segments: {segmentCount}</span>
-                <Slider
-                  className="max-w-[10rem]"
-                  min={SEGMENT_COUNT_MIN}
-                  max={SEGMENT_COUNT_MAX}
-                  step={1}
-                  value={[segmentCount]}
-                  onValueChange={([value]) => onSegmentCountChange(value)}
-                  disabled={isLoading}
-                  thumbLabel={`Segments: ${segmentCount}`}
-                />
-              </div>
+              <ToggleGroup
+                type="single"
+                size="sm"
+                variant="outline"
+                value={axis}
+                onValueChange={handleAxisChange}
+                aria-label="Occlusion axis"
+              >
+                <ToggleGroupItem value="time" className="h-7 px-2 text-xs">
+                  Time
+                </ToggleGroupItem>
+                <ToggleGroupItem value="frequency" className="h-7 px-2 text-xs">
+                  Frequency
+                </ToggleGroupItem>
+              </ToggleGroup>
+              {axis === "time" ? (
+                <div className="flex min-w-[10rem] flex-1 items-center gap-2 text-xs text-muted-foreground">
+                  <span className="whitespace-nowrap">Segments: {segmentCount}</span>
+                  <Slider
+                    className="max-w-[10rem]"
+                    min={SEGMENT_COUNT_MIN}
+                    max={SEGMENT_COUNT_MAX}
+                    step={1}
+                    value={[segmentCount]}
+                    onValueChange={([value]) => onSegmentCountChange(value)}
+                    disabled={isLoading}
+                    thumbLabel={`Segments: ${segmentCount}`}
+                  />
+                </div>
+              ) : (
+                <div className="flex-1" />
+              )}
               <Button size="sm" variant="outline" onClick={() => onGenerate?.()} disabled={!onGenerate || isLoading}>
                 {isLoading ? "Running occlusion passes…" : generateLabel}
               </Button>
@@ -288,6 +341,73 @@ export const SpeakerSaliencyMap = ({
                     );
                   })}
                 </div>
+              </div>
+            )}
+
+            {axis === "frequency" && (
+              <p className="text-[10px] text-muted-foreground">
+                Each band was silenced once. A green bar means removing it lowered the match score, so it supported
+                the match.
+              </p>
+            )}
+
+            {frequencyResult && (
+              <div className={staleReason ? "space-y-2 opacity-50 pointer-events-none" : "space-y-2"}>
+                <div className="text-xs text-muted-foreground">
+                  Baseline similarity: {formatScore(frequencyResult.baseline_similarity)}
+                </div>
+                <div className="space-y-1" data-testid="saliency-band-list">
+                  {frequencyResult.bands.map((band) => {
+                    const classification = classifySegment(band);
+                    const widthPct = isBandResultBelowDisplayThreshold
+                      ? 0
+                      : Math.min(1, band.influence_strength / maxBandInfluence) * 100;
+                    return (
+                      <div
+                        key={band.band_index}
+                        className="flex items-center gap-2 text-xs"
+                        title={`Occluded similarity: ${formatScore(band.occluded_similarity)} · ${CLASSIFICATION_LABEL[classification]}`}
+                      >
+                        <div className="w-40 shrink-0">
+                          <div className="font-medium">{band.label}</div>
+                          <div className="text-[10px] text-muted-foreground">
+                            {formatHzRange(band.low_hz, band.high_hz)}
+                          </div>
+                        </div>
+                        <div className="h-3 flex-1 overflow-hidden rounded bg-muted">
+                          <div
+                            data-testid={`saliency-band-bar-${band.band_index}`}
+                            data-classification={classification}
+                            className="h-full rounded"
+                            style={{
+                              width: `${widthPct}%`,
+                              backgroundColor: CLASSIFICATION_UNDERLINE[classification],
+                            }}
+                          />
+                        </div>
+                        <span className="w-16 shrink-0 text-right font-mono">
+                          {formatSigned(band.similarity_change)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                  {(["supports", "opposes", "minimal"] as const).map((classification) => (
+                    <span key={classification} className="flex items-center gap-1">
+                      <span
+                        className="h-2.5 w-2.5 rounded-sm"
+                        style={{ backgroundColor: CLASSIFICATION_UNDERLINE[classification] }}
+                      />
+                      {CLASSIFICATION_LABEL[classification]}
+                    </span>
+                  ))}
+                </div>
+                {isBandResultBelowDisplayThreshold && (
+                  <p className="text-[10px] text-muted-foreground">
+                    All band changes are below the minimum display-influence threshold.
+                  </p>
+                )}
               </div>
             )}
           </>
