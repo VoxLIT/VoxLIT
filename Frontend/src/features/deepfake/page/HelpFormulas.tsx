@@ -126,7 +126,7 @@ export const HelpFormulas = () => (
 
         <Section title="10. Listening heatmap (saliency)">
           <Formula>
-            a(t) = |E_ε[∂(z_spoof − z_bonafide) / ∂x(t)] · x(t)|,  ε ~ N(0, (0.1·σ_x)²), 8 samples  →  smoothed, averaged into 60 equal segments, divided by the max segment
+            a(t) = |E_ε[∂(z_spoof − z_bonafide) / ∂x(t)] · x(t)|,  ε ~ N(0, (0.1·σ_x)²), 8 samples by default  →  smoothed, averaged into 60 equal segments, divided by the max segment
           </Formula>
           <p>
             SmoothGrad × input on the decision margin: how much each instant of the waveform contributes to the verdict, weighted by what is actually there (a bare gradient measures sensitivity, which piles onto near-silent stretches). It leans towards loud regions, so whether the score depends on silence is the ablation&apos;s question, not this map&apos;s. Values are
@@ -205,7 +205,7 @@ export const HelpFormulas = () => (
             <li>Efron, B. &amp; Tibshirani, R. (1993). An Introduction to the Bootstrap. Chapman &amp; Hall.</li>
             <li>Tak, H. et al. (2022). Automatic speaker verification spoofing and deepfake detection using wav2vec 2.0 and data augmentation. Odyssey 2022.</li>
             <li>Zhang, Q., Wen, S. &amp; Hu, T. (2024). Audio Deepfake Detection with Self-Supervised XLS-R and SLS Classifier. ACM Multimedia 2024.</li>
-            <li>Liu, T. et al. (2025). Nes2Net: A Lightweight Nested Architecture for Foundation Model Driven Speech Anti-Spoofing. IEEE TIFS 20.</li>
+            <li>Liu, T. et al. (2025). Nes2Net: A Lightweight Nested Architecture for Foundation Model Driven Speech Anti-Spoofing. IEEE Transactions on Information Forensics and Security, 20.</li>
             <li>Dowerah, S. et al. (2025). Speech DF Arena: A Leaderboard for Speech DeepFake Detection Models. arXiv:2509.02859.</li>
           </ul>
         </Section>

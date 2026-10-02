@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import tempfile
 from dataclasses import asdict
 from pathlib import Path
@@ -377,10 +376,9 @@ class SaliencyRequest(BaseModel):
 async def saliency(request: SaliencyRequest, http_request: Request):
     """Feature 3 — waveform-aligned temporal attribution (SRS DF-14, DF-15).
 
-    SmoothGrad x input over a single clip (a few forward and backward passes;
-    see saliency.py for why). Emits the shared
-    saliency service's response contract so the payload is interchangeable
-    with its visualisation.
+    SmoothGrad x input over a single clip: a few forward and backward passes
+    (see saliency.py for why). Emits the shared saliency service's response
+    contract so the payload is interchangeable with its visualisation.
     """
     try:
         get_model_spec(request.model)

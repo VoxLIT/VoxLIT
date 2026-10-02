@@ -69,7 +69,7 @@ MAX_SALIENCY_SECONDS = int(os.getenv("MAX_SALIENCY_SECONDS", "12"))
 DEFAULT_SEGMENTS = 60
 
 # Noisy passes averaged per clip. Each costs one forward AND backward pass.
-SMOOTHGRAD_SAMPLES = int(os.getenv("DEEPFAKE_SMOOTHGRAD_SAMPLES", "8"))
+SMOOTHGRAD_SAMPLES = max(1, int(os.getenv("DEEPFAKE_SMOOTHGRAD_SAMPLES", "8")))
 # Noise standard deviation, as a fraction of the input's own standard deviation.
 SMOOTHGRAD_NOISE = 0.1
 # Fixed, so the same clip always yields the same map (results are cached).
@@ -129,19 +129,25 @@ def _smoothgrad(forward, target, adapter):
     generator = torch.Generator().manual_seed(SMOOTHGRAD_SEED)
     sigma = SMOOTHGRAD_NOISE * float(target.detach().std())
     total = torch.zeros_like(target)
-    for _ in range(max(1, SMOOTHGRAD_SAMPLES)):
+    for _ in range(SMOOTHGRAD_SAMPLES):
         noise = torch.randn(target.shape, generator=generator).to(target.device) * sigma
         noisy = (target.detach() + noise).requires_grad_(True)
         logits = forward(noisy)
-        adapter.model.zero_grad(set_to_none=True)
         margin = logits[0, adapter.spoof_index] - logits[0, adapter.bonafide_index]
-        margin.backward()
-        if noisy.grad is None:
+        # autograd.grad, not backward(): only the input's gradient is needed,
+        # and backward() would leave a ~1.2 GB .grad on every parameter of a
+        # 300M-parameter model that stays cached in memory afterwards.
+        gradient = (
+            torch.autograd.grad(margin, noisy, allow_unused=True)[0]
+            if margin.requires_grad
+            else None
+        )
+        if gradient is None:
             raise SaliencyUnavailable(
                 "No gradient reached the model input, so no attribution can be produced."
             )
-        total += noisy.grad.detach()
-    return total / max(1, SMOOTHGRAD_SAMPLES)
+        total += gradient.detach()
+    return total / SMOOTHGRAD_SAMPLES
 
 
 def _attribution_over_time(adapter, audio_path: str | Path, max_seconds: float):
@@ -153,7 +159,6 @@ def _attribution_over_time(adapter, audio_path: str | Path, max_seconds: float):
     time order, which is all the caller needs.
     """
     import numpy as np
-    import torch
 
     from .service import _load_waveform
 

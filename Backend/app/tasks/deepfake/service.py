@@ -20,7 +20,7 @@ import threading
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Callable, Protocol
 
 TARGET_SAMPLE_RATE = 16_000
 
@@ -476,10 +476,10 @@ class _Architecture:
     input is the embedding view's vector.
     """
 
-    load: object
+    load: Callable[..., Any]
     window_samples: int
-    prepare: object
-    head: object
+    prepare: Callable[[Any], Any]
+    head: Callable[[Any], Any]
     spoof_index: int
     bonafide_index: int
 

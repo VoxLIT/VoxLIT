@@ -6,3 +6,10 @@ CLAUDE.md
 
 * [0-9].*
 *.tsbuildinfo
+
+# macOS metadata
+**/.DS_Store
+
+# Papers and slide decks
+*.pdf
+*.pptx
