@@ -66,26 +66,29 @@ async def project_dataset(
     reduction_method: str,
     n_components: int,
     extra_clips: list[tuple[str, str, Path]] | None = None,
+    base_clips: list[tuple[str, str, Path]] | None = None,
 ) -> dict:
     """Score every recording, then reduce the embeddings to 2 or 3 axes.
 
     `extra_clips` are the visitor's own clips as (id, display name, path). They
     are projected together with the dataset -- so they land on the same axes --
-    and appended after it, flagged `uploaded: true`.
+    and appended after it, flagged `uploaded: true`. `base_clips`, in the same
+    shape, replaces the demo dataset with a researcher's custom one.
     """
     extra_clips = list(extra_clips or [])
     spec = get_model_spec(model_key)
-    recordings = list_recordings()
-    if not recordings:
+    if base_clips is None:
+        base_clips = [
+            (recording.recording_id, recording.display_filename, resolve_recording_path(recording.recording_id))
+            for recording in list_recordings()
+        ]
+    if not base_clips:
         # The folder exists but holds no clips: nothing to plot, and an empty
         # matrix has no columns to reduce.
-        raise DatasetUnavailable("The deepfake demo dataset contains no recordings.")
+        raise DatasetUnavailable("The selected dataset contains no recordings.")
 
     async with _scoring_lock(model_key):
-        payloads = [
-            await _embed_one(model_key, resolve_recording_path(recording.recording_id))
-            for recording in recordings
-        ]
+        payloads = [await _embed_one(model_key, path) for _, _, path in base_clips]
         extra_payloads = [await _embed_one(model_key, path) for _, _, path in extra_clips]
 
     all_payloads = payloads + extra_payloads
@@ -115,13 +118,13 @@ async def project_dataset(
         "n_components": n_components,
         "effective_components": effective_components,
         "embedding_dimension": int(matrix.shape[1]),
-        "total_recordings": len(recordings),
+        "total_recordings": len(base_clips),
         "threshold": spec.threshold,
         "threshold_calibrated": spec.threshold_calibrated,
         # Index-aligned with `coordinates`.
         "recordings": [
-            _row(recording.recording_id, recording.display_filename, payload, False)
-            for recording, payload in zip(recordings, payloads)
+            _row(clip_id, name, payload, False)
+            for (clip_id, name, _), payload in zip(base_clips, payloads)
         ]
         + [
             _row(clip_id, name, payload, True)

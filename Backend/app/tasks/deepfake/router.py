@@ -27,10 +27,12 @@ from .dataset import (
     list_recordings,
     resolve_recording_path,
 )
+from . import custom_datasets
+from .custom_datasets import DatasetError, DatasetNotFound, is_custom_clip_id
 from .embeddings import project_dataset
-from .evaluation import evaluate_dataset
+from .evaluation import CONDITIONS, evaluate_dataset
 from .saliency import METHOD as SALIENCY_METHOD, SaliencyUnavailable, generate_saliency
-from .silence_probe import SILENCE_TOP_DB, run_silence_probe
+from .silence_probe import SILENCE_PROBE_VERSION, SILENCE_TOP_DB, run_silence_probe
 from .metrics import NotEnoughLabelledData
 from .uploads import (
     ALLOWED_UPLOAD_EXTENSIONS,
@@ -61,16 +63,19 @@ CACHE_TTL_SECONDS = 7 * 24 * 60 * 60  # demo files are static; keep for a week
 
 
 def _resolve_clip(recording_id: str, request: Request) -> Path:
-    """A demo `rec_...` id or one of this session's `up_...` clips -> Path.
+    """A demo `rec_...` id, or one of this session's `up_...`/`cd_...` clips -> Path.
 
-    Each prefix goes to exactly one resolver and never falls through to the
-    other. Both raise a 404 on any miss, including another session's clip.
+    Each prefix goes to exactly one resolver and never falls through to
+    another. All raise a 404 on any miss, including another session's clip.
     """
+    sid = getattr(request.state, "sid", None)
     try:
         if is_upload_id(recording_id):
-            return resolve_upload_path(getattr(request.state, "sid", None), recording_id)
+            return resolve_upload_path(sid, recording_id)
+        if is_custom_clip_id(recording_id):
+            return custom_datasets.resolve_clip_path(sid, recording_id)
         return resolve_recording_path(recording_id)
-    except (DatasetUnavailable, RecordingNotFound, UploadNotFound) as error:
+    except (DatasetUnavailable, RecordingNotFound, UploadNotFound, DatasetNotFound) as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
@@ -208,10 +213,14 @@ async def delete_uploaded_clip(clip_id: str, request: Request):
 
 class EvaluationRequest(BaseModel):
     model: str
+    # "as_distributed" or "silence_trimmed" (see evaluation.CONDITIONS).
+    condition: str = "as_distributed"
+    # None = the built-in ASVspoof subset; otherwise a custom dataset's name.
+    dataset: str | None = None
 
 
 @router.post("/scores")
-async def evaluation(request: EvaluationRequest):
+async def evaluation(request: EvaluationRequest, http_request: Request):
     """Feature 1 — score distributions, DET curve and EER (SRS DF-6..DF-9).
 
     Aggregates only: no per-recording label is ever returned, so the
@@ -225,8 +234,25 @@ async def evaluation(request: EvaluationRequest):
     except UnsupportedDeepfakeModel as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
+    if request.condition not in CONDITIONS:
+        raise HTTPException(status_code=400, detail=f"condition must be one of: {', '.join(CONDITIONS)}.")
+
+    source = None
+    if request.dataset:
+        sid = getattr(http_request.state, "sid", None)
+        try:
+            clips, labels = custom_datasets.labelled_clips(sid, request.dataset)
+        except (DatasetError, DatasetNotFound) as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        if not labels:
+            raise HTTPException(
+                status_code=422,
+                detail="This dataset has no label file yet. Upload one in Manage Datasets to measure EER.",
+            )
+        source = (clips, labels, f"custom:{request.dataset}")
+
     try:
-        return await evaluate_dataset(request.model)
+        return await evaluate_dataset(request.model, condition=request.condition, source=source)
     except DatasetUnavailable as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except NotEnoughLabelledData as error:
@@ -241,6 +267,8 @@ class EmbeddingProjectionRequest(BaseModel):
     n_components: int = 2
     # The visitor's own `up_...` clips, placed on the same map as the dataset.
     extra_recording_ids: list[str] = []
+    # None = the built-in ASVspoof subset; otherwise a custom dataset's name.
+    dataset: str | None = None
 
 
 @router.post("/embeddings")
@@ -277,9 +305,23 @@ async def embedding_projection(request: EmbeddingProjectionRequest, http_request
             raise HTTPException(status_code=404, detail=str(error)) from error
         extra_clips.append((clip_id, name, path))
 
+    base_clips = None
+    if request.dataset:
+        try:
+            base_clips = [
+                (clip.recording_id, clip.display_filename, custom_datasets.resolve_clip_path(sid, clip.recording_id))
+                for clip in custom_datasets.list_clips(sid, request.dataset)
+            ]
+        except (DatasetError, DatasetNotFound) as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
     try:
         return await project_dataset(
-            request.model, request.reduction_method, request.n_components, extra_clips
+            request.model,
+            request.reduction_method,
+            request.n_components,
+            extra_clips,
+            **({"base_clips": base_clips} if base_clips is not None else {}),
         )
     except DatasetUnavailable as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -309,7 +351,7 @@ async def silence_probe(request: SilenceProbeRequest, http_request: Request):
     path = _resolve_clip(request.recording_id, http_request)
 
     audio_hash = await run_in_threadpool(file_sha256, path)
-    cache_model_key = f"df-silence:{request.model}:{THRESHOLD_VERSION}:{SILENCE_TOP_DB}"
+    cache_model_key = f"df-silence:{request.model}:{THRESHOLD_VERSION}:{SILENCE_TOP_DB}:{SILENCE_PROBE_VERSION}"
 
     cached = await get_result(cache_model_key, audio_hash)
     if cached is not None:
@@ -391,3 +433,100 @@ async def run(request: RunRequest, http_request: Request):
 
     await cache_result(cache_model_key, audio_hash, payload, ttl=CACHE_TTL_SECONDS)
     return {**payload, "recording_id": request.recording_id, "cached": False}
+
+
+# ── Custom datasets (Manage Datasets) ────────────────────────────────────────
+
+
+def _dataset_call(function, *args):
+    try:
+        return function(*args)
+    except DatasetError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except DatasetNotFound as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except UploadRejected as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.get("/datasets")
+async def custom_dataset_list(request: Request):
+    """The caller's datasets with file counts and label COUNTS (never labels)."""
+    sid = getattr(request.state, "sid", None)
+    datasets = await run_in_threadpool(custom_datasets.list_datasets, sid)
+    return {"datasets": datasets, "limits": {
+        "max_datasets": custom_datasets.MAX_DATASETS_PER_SESSION,
+        "max_files_per_dataset": custom_datasets.MAX_CLIPS_PER_DATASET,
+        "max_file_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
+        "ttl_days": custom_datasets.DATASET_TTL_SECONDS // 86400,
+    }}
+
+
+@router.post("/datasets")
+async def custom_dataset_create(request: Request, dataset_name: str = Form(...)):
+    sid = getattr(request.state, "sid", None)
+    return await run_in_threadpool(_dataset_call, custom_datasets.create_dataset, sid, dataset_name)
+
+
+@router.delete("/datasets/{dataset_name}")
+async def custom_dataset_delete(dataset_name: str, request: Request):
+    sid = getattr(request.state, "sid", None)
+    await run_in_threadpool(_dataset_call, custom_datasets.delete_dataset, sid, dataset_name)
+    return {"deleted": dataset_name}
+
+
+@router.get("/datasets/{dataset_name}/recordings")
+async def custom_dataset_recordings(dataset_name: str, request: Request):
+    sid = getattr(request.state, "sid", None)
+    clips = await run_in_threadpool(_dataset_call, custom_datasets.list_clips, sid, dataset_name)
+    return {"dataset": dataset_name, "recordings": [asdict(clip) for clip in clips]}
+
+
+def _store_dataset_file(file: UploadFile, sid: str | None, dataset_name: str) -> dict:
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in ALLOWED_UPLOAD_EXTENSIONS:
+        allowed = ", ".join(sorted(ALLOWED_UPLOAD_EXTENSIONS))
+        raise HTTPException(status_code=400, detail=f"Unsupported audio format. Allowed: {allowed}.")
+    with tempfile.TemporaryDirectory(prefix="df-dataset-") as scratch:
+        raw_path = Path(scratch) / f"raw{suffix}"
+        _write_limited(file, raw_path)
+        return asdict(_dataset_call(custom_datasets.add_clip, sid, dataset_name, raw_path, file.filename))
+
+
+@router.post("/datasets/{dataset_name}/files")
+async def custom_dataset_upload(dataset_name: str, request: Request, files: list[UploadFile] = File(...)):
+    """Add audio files; each is reported on its own so one bad file never sinks the batch."""
+    sid = getattr(request.state, "sid", None)
+    uploaded, errors = [], []
+    for file in files:
+        try:
+            uploaded.append(await run_in_threadpool(_store_dataset_file, file, sid, dataset_name))
+        except HTTPException as error:
+            if error.status_code == 404:
+                raise
+            errors.append({"filename": file.filename, "error": error.detail})
+    return {"dataset": dataset_name, "uploaded_files": uploaded, "errors": errors}
+
+
+@router.post("/datasets/{dataset_name}/labels")
+async def custom_dataset_labels(dataset_name: str, request: Request, file: UploadFile = File(...)):
+    """Attach a label file (CSV `filename,label[,attack]` or ASVspoof protocol).
+
+    Returns only how many files it matched, per class.
+    """
+    sid = getattr(request.state, "sid", None)
+    raw = await file.read(custom_datasets.MAX_LABEL_FILE_BYTES + 1)
+    if len(raw) > custom_datasets.MAX_LABEL_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="Label file exceeds 2 MB.")
+    text = raw.decode("utf-8-sig", errors="replace")
+    return await run_in_threadpool(_dataset_call, custom_datasets.set_labels, sid, dataset_name, text)
+
+
+@router.get("/datasets/clips/{clip_id}/audio")
+@router.head("/datasets/clips/{clip_id}/audio")
+async def custom_dataset_clip_audio(clip_id: str, request: Request):
+    try:
+        path = custom_datasets.resolve_clip_path(getattr(request.state, "sid", None), clip_id)
+    except DatasetNotFound as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    return stream_audio_file(path, request, path.name, "audio/wav")

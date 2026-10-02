@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { AnimatePresence, motion, useScroll, useSpring } from "motion/react";
-import { ArrowDown, AudioWaveform, Bot, Dices, Ear, HelpCircle, Lock, Mic, UserRound } from "lucide-react";
+import { ArrowDown, Bot, Dices, Ear, HelpCircle, Lock, Mic, Upload, UserRound } from "lucide-react";
+import { toast } from "sonner";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { API_BASE } from "@/lib/api";
 import type { TaskDefinition } from "@/tasks/types";
-import type { DeepfakeEmbeddingProjection, EmbeddingRecording, RecordingInfo, UserClip } from "../types";
+import type { CustomDataset, DeepfakeEmbeddingProjection, EmbeddingRecording, RecordingInfo, UserClip } from "../types";
 import { AllDetectors } from "./AllDetectors";
-import { errorMessage, listUserClips, postDeepfake } from "./api";
+import { errorMessage, listDatasetRecordings, listDatasets, listUserClips, postDeepfake, uploadUserClip } from "./api";
+import { DatasetManager } from "./DatasetManager";
+import { HelpFormulas } from "./HelpFormulas";
 import { DetectorReport } from "./DetectorReport";
 import { ListeningHeatmap } from "./ListeningHeatmap";
 import { readSession, useSessionState, writeSession } from "./session";
@@ -17,6 +22,7 @@ import { ErrorNote, FeatureImage, PrimaryButton, SectionTitle } from "./ui";
 import { VerdictPanel } from "./VerdictPanel";
 import { VoiceLibrary } from "./VoiceLibrary";
 import { VoiceMap, type ReductionMethod } from "./VoiceMap";
+import { convertToWav, wavName } from "./wav";
 import { YourClips } from "./YourClips";
 import "./deepfake-page.css";
 
@@ -25,6 +31,9 @@ const MODEL_BLURBS: Record<string, string> = {
   "ast-fakeaudio": "reads the spectrogram like an image",
   "xlsr-mamba": "a state-space model over wav2vec2 features",
 };
+
+/** Dataset menu value for the built-in subset (custom ones use their name). */
+const BUILTIN = "__builtin__";
 
 const NAV = [
   { href: "#your-voice", label: "Your voice" },
@@ -50,10 +59,19 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
   const model = availableModels.some((option) => option.id === storedModel) ? storedModel : fallbackModel;
   const modelLabel = task.models.find((option) => option.id === model)?.label ?? model;
 
+  const builtinDataset = task.datasets.find((dataset) => dataset.available);
+  // "" = the built-in ASVspoof subset; otherwise a custom dataset's name.
+  const [customDataset, setCustomDataset] = useSessionState("dataset", "");
+  const [customDatasets, setCustomDatasets] = useState<CustomDataset[]>([]);
+  const [datasetsVersion, setDatasetsVersion] = useState(0);
+  const activeCustom = customDatasets.find((dataset) => dataset.dataset_name === customDataset) ?? null;
+  const datasetLabel = customDataset || builtinDataset?.label || "None";
+
   const [recordings, setRecordings] = useState<RecordingInfo[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useSessionState("selected", "");
   const [userClips, setUserClips] = useState<UserClip[]>([]);
+  const uploadInput = useRef<HTMLInputElement>(null);
 
   const [mapStarted, setMapStarted] = useSessionState("map.started", false);
   const [method, setMethod] = useSessionState<ReductionMethod>("map.method", "pca");
@@ -65,31 +83,63 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
 
   const stage = useRef<HTMLElement>(null);
 
+  // The visitor's own clips from earlier in this session. Optional: the page
+  // works without them, so a failure here stays silent.
   useEffect(() => {
-    const load = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/tasks/deepfake/dataset/recordings`, { credentials: "include" });
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.detail || "Could not list recordings.");
-        setRecordings(payload.recordings as RecordingInfo[]);
-      } catch (caught) {
-        setListError(errorMessage(caught, "Could not list recordings."));
-      }
-    };
-    load();
-    // The visitor's own clips from earlier in this session. Optional: the page
-    // works without them, so a failure here stays silent.
     listUserClips()
       .then(setUserClips)
       .catch(() => undefined);
   }, []);
+
+  // Custom datasets for the toolbar's Dataset menu; a remembered one that has
+  // since expired or been deleted falls back to the built-in subset.
+  useEffect(() => {
+    listDatasets()
+      .then(({ datasets }) => {
+        setCustomDatasets(datasets);
+        if (customDataset && !datasets.some((dataset) => dataset.dataset_name === customDataset)) setCustomDataset("");
+      })
+      .catch(() => undefined);
+    // customDataset is read once per refresh on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [datasetsVersion]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        let list: RecordingInfo[];
+        if (customDataset) {
+          list = await listDatasetRecordings(customDataset);
+        } else {
+          const response = await fetch(`${API_BASE}/tasks/deepfake/dataset/recordings`, { credentials: "include" });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload.detail || "Could not list recordings.");
+          list = payload.recordings as RecordingInfo[];
+        }
+        if (cancelled) return;
+        setRecordings(list);
+        setListError(null);
+      } catch (caught) {
+        if (cancelled) return;
+        setRecordings([]);
+        setListError(errorMessage(caught, "Could not list recordings."));
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [customDataset, datasetsVersion]);
 
   // Placed on the same map as the dataset, so the visitor can see which
   // dataset clips the detector thinks their voice resembles.
   const userClipIds = useMemo(() => userClips.map((clip) => clip.recording_id), [userClips]);
   const userClipKey = userClipIds.join(",");
 
-  const projectionKey = `map.projection.${model}.${method}.${is3D ? 3 : 2}.${userClipKey}`;
+  // The dataset's file count is part of the key, so adding files redraws the map.
+  const datasetKey = customDataset ? `custom-${customDataset}-${recordings.length}` : "builtin";
+  const projectionKey = `map.projection.${datasetKey}.${model}.${method}.${is3D ? 3 : 2}.${userClipKey}`;
   const lastRefresh = useRef(refreshToken);
 
   useEffect(() => {
@@ -115,6 +165,7 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
         reduction_method: method,
         n_components: is3D ? 3 : 2,
         ...(userClipIds.length ? { extra_recording_ids: userClipIds } : {}),
+        ...(customDataset ? { dataset: customDataset } : {}),
       },
       controller.signal,
     )
@@ -131,7 +182,7 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
     return () => controller.abort();
     // userClipIds is covered by userClipKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapStarted, recordings.length, model, method, is3D, refreshToken, userClipKey]);
+  }, [mapStarted, recordings.length, model, method, is3D, refreshToken, userClipKey, datasetKey]);
 
   // Come back to the same place on the page after a refresh. The browser's
   // own restoration fires before the async content has height, so the
@@ -191,6 +242,28 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
     select(pick.recording_id, true);
   }, [recordings, selectedId, select]);
 
+  const changeDataset = (value: string) => {
+    setCustomDataset(value === BUILTIN ? "" : value);
+    setSelectedId("");
+    setProjection(null);
+  };
+
+  // The toolbar's Upload: same path as "Test your own voice" (converted to
+  // 16 kHz WAV in the browser, then stored as one of the visitor's clips).
+  const uploadFromToolbar = async (files: FileList | null) => {
+    for (const file of Array.from(files ?? [])) {
+      try {
+        const { wav } = await convertToWav(file);
+        const clip = await uploadUserClip(wav, wavName(file.name), "upload");
+        toast.success(`Uploaded: ${file.name}`);
+        addUserClip(clip);
+      } catch (caught) {
+        toast.error(`Failed to upload ${file.name}: ${errorMessage(caught, "Unknown error")}`);
+      }
+    }
+    if (uploadInput.current) uploadInput.current.value = "";
+  };
+
   const { scrollYProgress } = useScroll();
   const progress = useSpring(scrollYProgress, { stiffness: 120, damping: 30 });
 
@@ -202,72 +275,150 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
         aria-hidden
       />
 
-      {/* Toolbar — the same furniture as the other task pages. */}
-      <header className="sticky top-0 z-40 border-b border-border bg-card">
-        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2">
-          <Link to="/" className="flex items-center gap-1.5 text-base font-bold text-white">
-            <AudioWaveform className="h-4 w-4 text-cyan-300" />
-            VoxLIT
-          </Link>
-          <span className="rounded-sm bg-white/5 px-2 py-0.5 text-xs font-medium text-slate-300 ring-1 ring-white/10">
-            {task.name}
-          </span>
+      {/* Toolbar: the same furniture, sizes and order as the other task pages'
+          Toolbar (brand, task, Model, Dataset | Manage Datasets, Help, Upload),
+          plus this page's section links. */}
+      <TooltipProvider>
+        <header className="df-toolbar sticky top-0 z-40 border-b border-border bg-white">
+          <div className="flex min-h-12 flex-wrap items-center justify-between gap-x-5 gap-y-2 px-5 py-2">
+            <div className="flex flex-wrap items-center gap-5">
+              <div className="flex items-center gap-2.5">
+                <Link to="/" className="text-base font-bold text-foreground transition-colors hover:text-primary">
+                  VoxLIT
+                </Link>
+                <Badge variant="outline" className="border-primary/20 bg-primary/10 text-[10px] text-primary">
+                  v1.0
+                </Badge>
+                <Badge variant="secondary" className="text-[10px]">
+                  {task.name}
+                </Badge>
+              </div>
 
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-slate-400">Model:</span>
-            <TooltipProvider>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-medium text-foreground">Model:</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="h-3 w-3 cursor-help text-muted-foreground transition-colors hover:text-primary" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs space-y-1">
+                        <p className="text-xs">{MODEL_BLURBS[model] ? `${modelLabel}: ${MODEL_BLURBS[model]}.` : modelLabel}</p>
+                        <p className="text-xs">Every view on the page follows this detector.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <Select value={model} onValueChange={setModel}>
+                    <SelectTrigger className="h-7 w-[220px] border-border text-xs" aria-label="Detector model">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableModels.map((option) => (
+                        <SelectItem key={option.id} value={option.id} className="text-xs">
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs font-medium text-foreground">Dataset:</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="h-3 w-3 cursor-help text-muted-foreground transition-colors hover:text-primary" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-xs space-y-1">
+                        <p className="text-xs">Select the audio dataset to analyse.</p>
+                        <p className="text-xs">
+                          The built-in subset is labelled; custom datasets are yours, and need a label file before the
+                          Detector report can measure EER on them.
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <Select value={customDataset || BUILTIN} onValueChange={changeDataset}>
+                    <SelectTrigger className="h-7 w-48 border-border text-xs" aria-label="Dataset">
+                      <SelectValue placeholder="To be added" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={BUILTIN} className="text-xs" disabled={!builtinDataset}>
+                        {builtinDataset?.label ?? "Built-in dataset"}
+                      </SelectItem>
+                      {customDatasets.length > 0 && (
+                        <>
+                          <SelectItem disabled value="separator" className="text-xs">
+                            ── Custom Datasets ──
+                          </SelectItem>
+                          {customDatasets.map((dataset) => (
+                            <SelectItem
+                              key={dataset.dataset_name}
+                              value={dataset.dataset_name}
+                              disabled={dataset.total_files === 0}
+                              className="text-xs"
+                            >
+                              {dataset.dataset_name} ({dataset.total_files})
+                            </SelectItem>
+                          ))}
+                        </>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              <nav className="hidden items-center gap-0.5 2xl:flex" aria-label="Sections">
+                {NAV.map((item) => (
+                  <a
+                    key={item.href}
+                    href={item.href}
+                    className="rounded-sm px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                  >
+                    {item.label}
+                  </a>
+                ))}
+              </nav>
+
+              <DatasetManager
+                activeDataset={customDataset || null}
+                onSelect={(name) => {
+                  changeDataset(name);
+                  setDatasetsVersion((version) => version + 1);
+                }}
+                onChanged={(event) => {
+                  if (event.type === "deleted" && event.datasetName === customDataset) changeDataset(BUILTIN);
+                  setDatasetsVersion((version) => version + 1);
+                }}
+              />
+
+              <HelpFormulas />
+
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="cursor-help">
-                    <HelpCircle className="h-3.5 w-3.5 text-slate-400" />
-                  </span>
+                  <Button variant="default" size="sm" className="h-7 text-xs shadow-aws-sm" onClick={() => uploadInput.current?.click()}>
+                    <Upload className="mr-1.5 h-3.5 w-3.5" />
+                    Upload
+                  </Button>
                 </TooltipTrigger>
-                <TooltipContent className="max-w-xs text-xs font-normal">
-                  {MODEL_BLURBS[model] ? `${modelLabel}: ${MODEL_BLURBS[model]}.` : modelLabel}
+                <TooltipContent>
+                  <p>Upload audio files to test (added to "Your voice")</p>
                 </TooltipContent>
               </Tooltip>
-            </TooltipProvider>
-            <Select value={model} onValueChange={setModel}>
-              <SelectTrigger className="h-7 w-[220px] text-xs" aria-label="Detector model">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {availableModels.map((option) => (
-                  <SelectItem key={option.id} value={option.id} className="text-xs">
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              <input
+                ref={uploadInput}
+                type="file"
+                accept="audio/*,.flac,.wav,.mp3,.m4a,.ogg"
+                multiple
+                onChange={(event) => uploadFromToolbar(event.target.files)}
+                className="hidden"
+              />
+            </div>
           </div>
-
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-slate-400">Dataset:</span>
-            <span className="rounded-sm border border-border px-2 py-1 text-xs text-slate-300">
-              {task.datasets.find((dataset) => dataset.available)?.label ?? "None"}
-            </span>
-          </div>
-
-          <nav className="ml-auto hidden items-center gap-0.5 lg:flex" aria-label="Sections">
-            {NAV.map((item) => (
-              <a
-                key={item.href}
-                href={item.href}
-                className="rounded-sm px-2 py-1 text-xs text-slate-400 transition hover:bg-white/5 hover:text-white"
-              >
-                {item.label}
-              </a>
-            ))}
-            <Link
-              to="/help"
-              className="rounded-sm px-2 py-1 text-xs text-cyan-300 font-medium transition hover:bg-white/10 hover:text-white flex items-center gap-1"
-            >
-              <HelpCircle className="h-3 w-3" />
-              Help & Formulas
-            </Link>
-          </nav>
-        </div>
-      </header>
+        </header>
+      </TooltipProvider>
 
       <main className="relative z-10">
         <Hero
@@ -415,13 +566,21 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
           <SectionTitle eyebrow="Step 4: The big picture" title={<>How good is <span className="df-gradient-text">{modelLabel}</span>?</>}>
             A single verdict can be lucky. Test the detector on every labelled clip and see the mistakes it makes.
           </SectionTitle>
-          <DetectorReport model={model} modelLabel={modelLabel} datasetSize={recordings.length} />
+          <DetectorReport
+            key={customDataset || BUILTIN}
+            model={model}
+            modelLabel={modelLabel}
+            datasetSize={recordings.length}
+            customDataset={customDataset || null}
+            labelledCount={activeCustom?.labels.matched_files ?? null}
+          />
         </section>
 
         <section id="library" className="mx-auto max-w-[1600px] scroll-mt-14 px-4 py-4">
-          <SectionTitle eyebrow="The dataset" title="Voice library">
-            All {recordings.length || ""} clips from the ASVspoof 2019 LA subset. Their real/fake answers are kept
-            hidden on purpose. Judge first, then check the protocol file.
+          <SectionTitle eyebrow="The dataset" title={customDataset ? <>Voice library: <span className="df-gradient-text">{customDataset}</span></> : "Voice library"}>
+            {customDataset
+              ? `All ${recordings.length} clips in your dataset "${customDataset}". Any labels you uploaded stay hidden here and are used only for the Detector report's aggregate metrics.`
+              : `All ${recordings.length || ""} clips from the ${datasetLabel}. Their real/fake answers are kept hidden on purpose. Judge first, then check the protocol file.`}
           </SectionTitle>
           <VoiceLibrary
             recordings={recordings}

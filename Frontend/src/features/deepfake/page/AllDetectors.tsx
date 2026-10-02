@@ -325,13 +325,22 @@ const SilenceBlock = ({ result }: { result: SilenceProbeResult }) => {
         const variant = result.variants[leg.key];
         const score = variant.applicable ? variant.spoof_probability : null;
         return (
-          <div key={leg.key} className="grid grid-cols-[84px_1fr_64px] items-center gap-2 text-xs">
+          <div key={leg.key} className="grid grid-cols-[84px_1fr_72px] items-center gap-2 text-xs" title={variant.reason}>
             <span className="text-slate-400">{leg.label}</span>
-            {score !== null ? <Bar score={score} threshold={result.threshold} /> : <span className="text-slate-500">not enough audio</span>}
-            <span className="text-right font-mono text-white">{score !== null ? formatScore(score, 2) : "n/a"}</span>
+            {score !== null ? (
+              <Bar score={score} threshold={result.threshold} />
+            ) : (
+              <span className="font-mono text-slate-500">{variant.seconds.toFixed(3)} s, no score</span>
+            )}
+            <span className="text-right font-mono text-white">
+              {score !== null ? `${formatScore(score)}${variant.reliable === false ? " †" : ""}` : "none"}
+            </span>
           </div>
         );
       })}
+      {LEGS.some((leg) => result.variants[leg.key].applicable && result.variants[leg.key].reliable === false) && (
+        <p className="text-[10px] text-slate-400">† scored on under {result.min_non_speech_seconds.toFixed(2)} s of audio; indicative only.</p>
+      )}
       {verdict && (
         <p className={`text-xs font-semibold ${verdict.alarming ? "text-amber-300" : "text-emerald-300"}`}>{verdict.title}</p>
       )}

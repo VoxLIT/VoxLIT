@@ -86,16 +86,16 @@ export const SilenceTest = ({ model, recordingId }: { model: string; recordingId
                     <dt className="text-slate-400">{leg.label}</dt>
                     <dd className="font-mono text-white">
                       {variant.applicable && variant.spoof_probability !== null
-                        ? formatScore(variant.spoof_probability)
-                        : "n/a"}
+                        ? `${formatScore(variant.spoof_probability)}${variant.reliable === false ? " †" : ""}`
+                        : "no score"}
                     </dd>
-                    <dd className="font-mono text-slate-500">{variant.seconds.toFixed(2)}s</dd>
+                    <dd className="font-mono text-slate-500">{variant.seconds.toFixed(3)} s</dd>
                   </div>
                 );
               })}
             </dl>
             {LEGS.map((leg) =>
-              result.variants[leg.key].applicable ? null : (
+              !result.variants[leg.key].reason ? null : (
                 <p key={leg.key} className="text-xs text-slate-400">
                   <span className="font-semibold text-slate-200">{leg.label}:</span> {result.variants[leg.key].reason}
                 </p>
@@ -105,7 +105,8 @@ export const SilenceTest = ({ model, recordingId }: { model: string; recordingId
               <div className="mb-1 flex justify-between text-xs text-slate-400">
                 <span>speech vs non-speech</span>
                 <span className="font-mono">
-                  {result.speech_seconds.toFixed(2)}s / {result.non_speech_seconds.toFixed(2)}s
+                  {result.speech_seconds.toFixed(3)} s / {result.non_speech_seconds.toFixed(3)} s (
+                  {(result.non_speech_fraction * 100).toFixed(1)}% non-speech)
                 </span>
               </div>
               <div className="flex h-2 overflow-hidden rounded-full bg-white/10">
@@ -120,8 +121,8 @@ export const SilenceTest = ({ model, recordingId }: { model: string; recordingId
             </div>
             <p className="text-xs text-slate-400">
               Silence = audio more than {result.silence_top_db} dB below this clip&apos;s own peak (relative, not an
-              absolute noise floor). A silence-only score needs at least {result.min_non_speech_seconds.toFixed(2)}s
-              of it. Threshold {result.threshold.toFixed(2)}
+              absolute noise floor). Scores on less than {result.min_non_speech_seconds.toFixed(2)} s of audio are
+              marked † (indicative only); below {(result.min_scorable_seconds ?? 0.1).toFixed(2)} s nothing can be scored. Threshold {result.threshold.toFixed(2)}
               {result.threshold_calibrated ? "" : " (uncalibrated)"}.{result.cached ? " Cached." : ""}
             </p>
           </Disclosure>
@@ -153,27 +154,37 @@ const ThreeColumns = ({ result }: { result: SilenceProbeResult }) => (
         <div key={leg.key}>
           <div className="text-xs font-semibold text-white">{leg.label}</div>
           <div className="text-[10px] text-slate-400">{leg.hint}</div>
+          <div className="font-mono text-[10px] text-slate-500">{result.variants[leg.key].seconds.toFixed(3)} s</div>
         </div>
       ))}
     </div>
+    {LEGS.some((leg) => result.variants[leg.key].applicable && result.variants[leg.key].reliable === false) && (
+      <p className="mt-2 text-[10px] leading-snug text-slate-400">
+        † Scored on less than {(result.min_non_speech_seconds ?? 0.5).toFixed(2)} s of audio: shown for
+        completeness, but too short to weigh as evidence.
+      </p>
+    )}
   </div>
 );
 
 const Column = ({ variant, delay }: { variant: ProbeVariant; delay: number }) => {
   const { scoreColor } = usePalette();
   if (!variant.applicable || variant.spoof_probability === null) {
+    // Nothing to score: say how much audio there was rather than a vague "too little".
     return (
       <div className="flex items-end justify-center">
-        <div className="w-full rounded-xl border border-dashed border-white/20 py-3 text-center text-[11px] text-slate-400">
-          too little audio
+        <div className="w-full rounded-xl border border-dashed border-white/20 px-1 py-2 text-center">
+          <div className="font-mono text-xs font-semibold text-slate-300">{variant.seconds.toFixed(3)} s</div>
+          <div className="text-[10px] leading-tight text-slate-400">no audio left to score</div>
         </div>
       </div>
     );
   }
   const score = variant.spoof_probability;
   const colour = scoreColor(score);
+  const unreliable = variant.reliable === false;
   return (
-    <div className="flex flex-col items-center justify-end">
+    <div className="flex flex-col items-center justify-end" title={variant.reason}>
       <motion.span
         className="mb-1 font-mono text-xs font-semibold"
         style={{ color: colour }}
@@ -181,11 +192,18 @@ const Column = ({ variant, delay }: { variant: ProbeVariant; delay: number }) =>
         animate={{ opacity: 1 }}
         transition={{ delay: delay + 0.5 }}
       >
-        {formatScore(score, 2)}
+        {formatScore(score)}
+        {unreliable && <sup className="ml-0.5 text-slate-400">†</sup>}
       </motion.span>
       <motion.div
         className="w-full rounded-t-xl"
-        style={{ background: `linear-gradient(180deg, ${colour}, ${colour}33)`, boxShadow: `0 0 24px -6px ${colour}` }}
+        style={{
+          background: unreliable
+            ? `repeating-linear-gradient(45deg, ${colour}99 0 3px, ${colour}26 3px 7px)`
+            : `linear-gradient(180deg, ${colour}, ${colour}33)`,
+          border: unreliable ? `1px dashed ${colour}` : undefined,
+          boxShadow: unreliable ? undefined : `0 0 24px -6px ${colour}`,
+        }}
         initial={{ height: 0 }}
         animate={{ height: Math.max(4, score * (HEIGHT - 18)) }}
         transition={{ type: "spring", stiffness: 90, damping: 14, delay }}
