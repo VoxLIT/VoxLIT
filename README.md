@@ -1,17 +1,11 @@
 # VoxLIT — Learning Interpretability Tool for Voice Models
 
 <p align="center">
-  <a href="https://github.com/chanuGX/VoxLIT">
+  <a href="https://github.com/VoxLIT/VoxLIT">
     <img src="https://img.shields.io/badge/version-v1.0-blue" alt="Version"/>
   </a>
-  <a href="https://github.com/chanuGX/VoxLIT/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/chanuGX/VoxLIT" alt="License"/>
-  </a>
-  <a href="https://github.com/chanuGX/VoxLIT/stargazers">
-    <img src="https://img.shields.io/github/stars/chanuGX/VoxLIT" alt="Stars"/>
-  </a>
-  <a href="https://github.com/chanuGX/VoxLIT/issues">
-    <img src="https://img.shields.io/github/issues/chanuGX/VoxLIT" alt="Issues"/>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"/>
   </a>
 </p>
 
@@ -19,7 +13,15 @@ Interpreting how deep learning models make decisions is crucial, especially in h
 
 VoxLIT extends the interpretability paradigm to audio models, providing researchers and developers with tools to analyze and debug speech models with greater transparency. Through interactive visualizations, attention mechanisms, and perturbation analyses, you can gain deeper insights into how your audio models make decisions.
 
-VoxLIT is organized as a homepage plus **five task workbenches** (Speech Transcription, Emotion Recognition, and three tasks in development). Tasks, their models, and their datasets are configured centrally — see [STRUCTURE.md](STRUCTURE.md) for the repository layout, the task registry, and how to add a new task, model, or dataset.
+VoxLIT is organized as a homepage plus **five task workbenches**, all active. Tasks, their models, and their datasets are configured centrally — see [STRUCTURE.md](STRUCTURE.md) for the repository layout, the task registry, and how to add a new task, model, or dataset.
+
+| Task | Models | Dataset |
+| --- | --- | --- |
+| Speech Transcription | Whisper base, Whisper large-v3 | Common Voice |
+| Emotion Recognition | wav2vec2 | RAVDESS |
+| Speaker Verification | ECAPA-TDNN, ResNet34-LM | VoxCeleb1 demo subset |
+| Speaker Diarization | pyannote 3.1, Reverb v1, Reverb v2 | AMI subset |
+| Audio Deepfake Detection | wav2vec2 XLS-R, AST, XLSR-Mamba, Wav2Vec2-AASIST, XLSR-SLS, Nes2Net-X | ASVspoof 2019 LA subset |
 
 ## Features
 
@@ -38,11 +40,16 @@ VoxLIT is organized as a homepage plus **five task workbenches** (Speech Transcr
 - **Frontend**: React 18 + TypeScript + Vite
 - **UI Framework**: Tailwind CSS + shadcn/ui components
 - **State Management**: TanStack Query
-- **Data Visualization**: Custom React components with Chart.js integration
-- **Audio Processing**: Web Audio API
+- **Routing**: React Router
+- **Data Visualization**: Recharts, Plotly.js, and Three.js (via react-three-fiber) for 3D embedding views
+- **Animation**: Motion
+- **Audio Processing**: Web Audio API + wavesurfer.js
 - **Backend**: FastAPI + Python 3.11
-- **Models**: Transformer-based audio models (Whisper, Wav2Vec2)
+- **ML**: PyTorch, Hugging Face Transformers, pyannote.audio, Captum, scikit-learn, UMAP, librosa
+- **Models**: Whisper, wav2vec2 / XLS-R, ECAPA-TDNN, pyannote, Audio Spectrogram Transformer, and XLS-R-based deepfake detectors
 - **Storage**: Redis for caching predictions and results
+- **Testing**: Vitest (frontend) and pytest (backend)
+- **Deployment**: Modal (frontend + backend + Redis in one container, behind nginx)
 
 ## Prerequisites
 
@@ -53,13 +60,14 @@ VoxLIT is organized as a homepage plus **five task workbenches** (Speech Transcr
 - **Backend**:
   - Python 3.11
   - Docker Desktop (for Redis)
+  - A Hugging Face access token, for the gated pyannote diarization models
 
 ## Installation
 
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/chanuGX/VoxLIT.git
+git clone https://github.com/VoxLIT/VoxLIT.git
 cd VoxLIT
 ```
 
@@ -81,7 +89,7 @@ cd Backend
 docker compose up -d
 ```
 
-The backend defaults to `redis://localhost:6379/0`, so no `.env` is needed for local development. To override settings (e.g., a remote Redis), create `Backend/.env` with `REDIS_URL=...`.
+The backend defaults to `redis://localhost:6379/0`, so no `.env` is needed for local development. To override settings (e.g., a remote Redis), create `Backend/.env` with `REDIS_URL=...`. Speaker Diarization uses gated pyannote models: accept their terms on Hugging Face and add `HF_TOKEN=...` to `Backend/.env`.
 
 ### 4. Set up the Backend
 
@@ -99,7 +107,7 @@ uvicorn app.main:app --reload
 
 The API runs at http://localhost:8000.
 
-Model weights (Whisper, Wav2Vec2) are downloaded from Hugging Face on first startup and cached under `~/.cache/huggingface`. The first launch takes a few minutes; `whisper-large-v3` (~3 GB) is only downloaded if selected in the UI.
+Model weights are downloaded from Hugging Face and cached under `~/.cache/huggingface`. Whisper and wav2vec2 load on first startup, which takes a few minutes; the other tasks' models download the first time they are used, and `whisper-large-v3` (~3 GB) only if selected in the UI. The deepfake detectors are about 1.3 GB each.
 
 ### 5. Access the Application
 
@@ -109,32 +117,48 @@ Open your browser and navigate to [http://localhost:8080](http://localhost:8080)
 
 ```
 VoxLIT/
-├── Frontend/                # React frontend application
-│   ├── components/          # React components
-│   │   ├── analysis/        # Analysis and perturbation tools
-│   │   ├── audio/           # Audio visualization components
-│   │   ├── layout/          # Layout components
-│   │   ├── panels/          # Dashboard panels
-│   │   ├── ui/              # Reusable UI components
-│   │   └── visualization/   # Data visualization components
-│   ├── hooks/               # Custom React hooks
-│   ├── lib/                 # Utility functions
-│   └── pages/               # Page components
+├── Frontend/                    # React frontend application
+│   └── src/
+│       ├── components/          # Shared React components
+│       │   ├── analysis/        # Analysis and perturbation tools
+│       │   ├── audio/           # Audio visualization components
+│       │   ├── dataset/         # Dataset management
+│       │   ├── panels/          # Dashboard panels
+│       │   ├── site/            # Homepage and site chrome
+│       │   ├── ui/              # Reusable UI components (shadcn/ui)
+│       │   ├── visualization/   # Data visualization components
+│       │   └── workbench/       # Shared task-workbench layout
+│       ├── features/            # One folder per task workbench
+│       │   ├── transcription/
+│       │   ├── emotion/
+│       │   ├── verification/
+│       │   ├── task-b/          # Speaker diarization
+│       │   └── deepfake/
+│       ├── tasks/               # Frontend task registry
+│       ├── contexts/            # React contexts
+│       ├── hooks/               # Custom React hooks
+│       ├── lib/                 # API client and utilities
+│       └── pages/               # Home, task page, help portal
 │
-├── Backend/                 # FastAPI backend application
-│   ├── app/                 # Application code
-│   │   ├── api/             # API routes and endpoints
-│   │   ├── core/            # Core functionality
-│   │   └── services/        # Business logic services
-│   ├── data/                # Sample datasets (git-ignored; add your own)
-│   ├── tests/               # Backend tests
-│   └── uploads/             # User-uploaded audio files
+├── Backend/                     # FastAPI backend application
+│   ├── app/                     # Application code
+│   │   ├── api/                 # Shared API routes and endpoints
+│   │   ├── core/                # Settings and core functionality
+│   │   ├── services/            # Shared business logic services
+│   │   └── tasks/               # Per-task routers, models and services + task registry
+│   ├── data/                    # Sample datasets (git-ignored; add your own)
+│   ├── scripts/                 # Dataset download and preparation scripts
+│   ├── tests/                   # Backend tests
+│   └── uploads/                 # User-uploaded audio files
 │
-├── CODE_OF_CONDUCT.md       # Community guidelines
-├── CONTRIBUTING.md          # Contribution guidelines
-├── LICENSE                  # MIT License
-├── README.md                # Project documentation
-└── SECURITY.md              # Security policy
+├── deploy/                      # Modal deployment (app, nginx config, model checks)
+├── STRUCTURE.md                 # Repository layout and task registry guide
+├── CHANGELOG.md                 # Release notes
+├── CODE_OF_CONDUCT.md           # Community guidelines
+├── CONTRIBUTING.md              # Contribution guidelines
+├── LICENSE                      # MIT License
+├── README.md                    # Project documentation
+└── SECURITY.md                  # Security policy
 ```
 
 ## Available Scripts
@@ -145,6 +169,7 @@ VoxLIT/
 - `npm run build` - Build for production
 - `npm run lint` - Run ESLint
 - `npm run preview` - Preview production build
+- `npm test` - Run frontend tests (Vitest)
 
 ### Backend
 
@@ -153,15 +178,16 @@ VoxLIT/
 
 ## Usage
 
-1. **Upload Audio Data**: Use the audio uploader to load your audio files
-2. **Select Models**: Choose from available audio models for analysis
-3. **Explore Visualizations**:
+1. **Pick a Task**: Choose a workbench from the homepage
+2. **Load Audio**: Use the task's built-in dataset or upload your own audio files
+3. **Select Models**: Choose from the task's available models
+4. **Explore Visualizations**:
    - Examine waveforms and spectrograms
    - View model predictions and confidence scores
    - Explore attention patterns and embedding spaces
    - Generate saliency maps to highlight important audio regions
-4. **Apply Perturbations**: Test model robustness with various audio perturbations
-5. **Analyze Results**: Use the interactive dashboard to gain insights
+5. **Apply Perturbations**: Test model robustness with various audio perturbations
+6. **Analyze Results**: Use the interactive dashboard to gain insights
 
 ## Contributing
 
