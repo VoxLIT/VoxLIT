@@ -126,10 +126,10 @@ export const HelpFormulas = () => (
 
         <Section title="10. Listening heatmap (saliency)">
           <Formula>
-            a(t) = |∂ z_spoof / ∂ x(t)|  →  smoothed, averaged into 60 equal segments, divided by the max segment
+            a(t) = |E_ε[∂(z_spoof − z_bonafide) / ∂x(t)] · x(t)|,  ε ~ N(0, (0.1·σ_x)²), 8 samples  →  smoothed, averaged into 60 equal segments, divided by the max segment
           </Formula>
           <p>
-            Input-gradient attribution: how strongly each instant of the waveform moves the spoof logit. Values are
+            SmoothGrad × input on the decision margin: how much each instant of the waveform contributes to the verdict, weighted by what is actually there (a bare gradient measures sensitivity, which piles onto near-silent stretches). It leans towards loud regions, so whether the score depends on silence is the ablation&apos;s question, not this map&apos;s. Values are
             relative within one clip (the peak is 1). &ldquo;Share in speech&rdquo; is the fraction of attribution mass
             inside the probe&apos;s speech intervals; compare it with the share of the clip that is speech.
           </p>
@@ -169,6 +169,21 @@ export const HelpFormulas = () => (
                 <td className="pr-2 font-mono">AustinXiao/XLSR-Mamba-LA</td>
                 <td>wav2vec2 features, 4.17 s window</td>
               </tr>
+              <tr className="border-t">
+                <td className="py-1 pr-2">D · Wav2Vec2-AASIST</td>
+                <td className="pr-2 font-mono">SpeechAntiSpoofingBenchmarks/W2V2-AASIST</td>
+                <td>wav2vec2 features → graph attention, 4.04 s window</td>
+              </tr>
+              <tr className="border-t">
+                <td className="py-1 pr-2">E · XLSR-SLS</td>
+                <td className="pr-2 font-mono">SpeechAntiSpoofingBenchmarks/XLSR-SLS</td>
+                <td>all 24 wav2vec2 layers, gated, 4.04 s window</td>
+              </tr>
+              <tr className="border-t">
+                <td className="py-1 pr-2">F · Nes2Net-X</td>
+                <td className="pr-2 font-mono">SpeechAntiSpoofingBenchmarks/Nes2Net</td>
+                <td>wav2vec2 features → nested Res2Net, 4.04 s window</td>
+              </tr>
             </tbody>
           </table>
         </Section>
@@ -188,6 +203,10 @@ export const HelpFormulas = () => (
             <li>Müller, N. M. et al. (2021). Speech is Silver, Silence is Golden: What do ASVspoof-trained Models Really Learn? ASVspoof 2021 Workshop.</li>
             <li>Martin, A. et al. (1997). The DET curve in assessment of detection task performance. Eurospeech.</li>
             <li>Efron, B. &amp; Tibshirani, R. (1993). An Introduction to the Bootstrap. Chapman &amp; Hall.</li>
+            <li>Tak, H. et al. (2022). Automatic speaker verification spoofing and deepfake detection using wav2vec 2.0 and data augmentation. Odyssey 2022.</li>
+            <li>Zhang, Q., Wen, S. &amp; Hu, T. (2024). Audio Deepfake Detection with Self-Supervised XLS-R and SLS Classifier. ACM Multimedia 2024.</li>
+            <li>Liu, T. et al. (2025). Nes2Net: A Lightweight Nested Architecture for Foundation Model Driven Speech Anti-Spoofing. IEEE TIFS 20.</li>
+            <li>Dowerah, S. et al. (2025). Speech DF Arena: A Leaderboard for Speech DeepFake Detection Models. arXiv:2509.02859.</li>
           </ul>
         </Section>
 

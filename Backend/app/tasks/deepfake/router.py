@@ -377,7 +377,8 @@ class SaliencyRequest(BaseModel):
 async def saliency(request: SaliencyRequest, http_request: Request):
     """Feature 3 — waveform-aligned temporal attribution (SRS DF-14, DF-15).
 
-    One forward and one backward pass over a single clip. Emits the shared
+    SmoothGrad x input over a single clip (a few forward and backward passes;
+    see saliency.py for why). Emits the shared
     saliency service's response contract so the payload is interchangeable
     with its visualisation.
     """

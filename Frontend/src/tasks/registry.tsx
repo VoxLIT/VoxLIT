@@ -132,12 +132,15 @@ export const TASKS: TaskDefinition[] = [
     route: "/tasks/deepfake",
     name: "Audio Deepfake Detection",
     shortDescription:
-      "Score speech as bona fide or synthetic with three detectors that fail differently — a wav2vec2 XLS-R classifier, a spectrogram transformer, and a dual-column state-space model — against an ASVspoof 2019 LA subset.",
+      "Score speech as bona fide or synthetic with six detectors that fail differently — a wav2vec2 XLS-R classifier, a spectrogram transformer, and four XLS-R back ends (state-space, graph-attention, layer-selection and nested Res2Net) — against an ASVspoof 2019 LA subset.",
     status: "active",
     models: [
       { id: "xlsr-deepfake", label: "wav2vec2 XLS-R (Model A)", available: true },
       { id: "ast-fakeaudio", label: "Audio Spectrogram Transformer (Model B)", available: true },
       { id: "xlsr-mamba", label: "XLSR-Mamba (Model C)", available: true },
+      { id: "w2v2-aasist", label: "Wav2Vec2-AASIST (Model D)", available: true },
+      { id: "xlsr-sls", label: "XLSR-SLS (Model E)", available: true },
+      { id: "nes2net-x", label: "Nes2Net-X (Model F)", available: true },
     ],
     defaultModel: "xlsr-deepfake",
     // available:true so the toolbar names the dataset actually in use. Like

@@ -223,7 +223,7 @@ export interface DeepfakeSaliency {
   method: string;
   /** SRS DF-15 — human-readable method name, shown in the interface. */
   method_label: string;
-  /** Which logit the gradient was taken of. */
+  /** What the attribution explains (the spoof − bonafide logit margin). */
   target: string;
 
   segments: SaliencySegment[];

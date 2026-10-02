@@ -42,8 +42,9 @@ def _adapter():
     return SimpleNamespace(
         model=_LoudHalfModel(),
         spoof_index=1,
+        bonafide_index=0,
         analysis_window_seconds=30.0,
-        _xlsr_mamba=SimpleNamespace(pad_or_tile=lambda samples: samples),
+        prepare_input=lambda samples: torch.from_numpy(samples).float().unsqueeze(0),
     )
 
 
@@ -104,6 +105,102 @@ def test_a_flat_attribution_does_not_divide_by_zero():
     assert all(value == 0.0 for value in series)
 
 
+class _SharedFirstHalfModel(torch.nn.Module):
+    """Both logits react to the first half; only spoof reacts to the second.
+
+    The first half therefore cannot move the DECISION, and must get no
+    attribution, however much it moves the spoof logit on its own.
+    """
+
+    def zero_grad(self, set_to_none: bool = True):  # noqa: D102
+        pass
+
+    def forward(self, waveform):
+        half = waveform.shape[-1] // 2
+        shared = (waveform[..., :half] ** 2).sum()
+        spoof = shared + (waveform[..., half:] ** 2).sum()
+        return torch.stack([shared, spoof]).unsqueeze(0)
+
+
+def test_attribution_explains_the_decision_margin_not_the_spoof_logit(clip):
+    adapter = _adapter()
+    adapter.model = _SharedFirstHalfModel()
+
+    attribution, _ = saliency._attribution_over_time(adapter, clip, 30.0)
+
+    half = attribution.size // 2
+    assert attribution[:half].sum() == pytest.approx(0.0, abs=1e-6)
+    assert attribution[half:].sum() > 0.0
+
+
+def test_silence_gets_no_attribution_however_sensitive_the_model_is(tmp_path):
+    """x input: a bare gradient lights up silence the model is merely sensitive to."""
+
+    class _Sensitive(torch.nn.Module):
+        def zero_grad(self, set_to_none: bool = True):  # noqa: D102
+            pass
+
+        def forward(self, waveform):
+            spoof = waveform.sum()  # gradient of 1 everywhere, silence included
+            return torch.stack([torch.zeros_like(spoof), spoof]).unsqueeze(0)
+
+    path = tmp_path / "half_silent.wav"
+    audio = np.concatenate([np.zeros(SAMPLE_RATE), np.ones(SAMPLE_RATE) * 0.5])
+    sf.write(path, audio.astype(np.float32), SAMPLE_RATE)
+    adapter = _adapter()
+    adapter.model = _Sensitive()
+
+    attribution, _ = saliency._attribution_over_time(adapter, path, 30.0)
+
+    assert attribution[:SAMPLE_RATE].sum() == 0.0
+    assert attribution[SAMPLE_RATE:].sum() > 0.0
+
+
+def test_a_tiled_short_clip_maps_back_onto_its_own_timeline(tmp_path):
+    """Tier B tiles a short clip to fill its window. A 1 s clip in a 4 s window
+    must come back as 1 s of attribution, each copy folded onto its sample."""
+    from app.tasks.deepfake.xlsr_mamba import pad_or_tile
+
+    class _FirstQuarterSecond(torch.nn.Module):
+        def zero_grad(self, set_to_none: bool = True):  # noqa: D102
+            pass
+
+        def forward(self, waveform):
+            spoof = (waveform[..., : SAMPLE_RATE // 4] ** 2).sum()
+            return torch.stack([torch.zeros_like(spoof), spoof]).unsqueeze(0)
+
+    path = tmp_path / "short.wav"
+    sf.write(path, np.ones(SAMPLE_RATE, dtype=np.float32) * 0.5, SAMPLE_RATE)
+    adapter = _adapter()
+    adapter.model = _FirstQuarterSecond()
+    adapter.analysis_window_seconds = 4.0
+    adapter.prepare_input = lambda samples: torch.from_numpy(
+        pad_or_tile(samples, max_len=SAMPLE_RATE * 4)
+    ).float().unsqueeze(0)
+
+    attribution, seconds = saliency._attribution_over_time(adapter, path, 30.0)
+
+    assert seconds == pytest.approx(1.0, abs=0.01)
+    assert attribution.size == SAMPLE_RATE
+    assert attribution[: SAMPLE_RATE // 4].sum() > 0.0
+    assert attribution[SAMPLE_RATE // 4 :].sum() == 0.0
+
+
+def test_speech_after_the_analysed_window_is_not_counted(tmp_path):
+    """The overlay must cover only what was attributed, or the speech share the
+    view compares against is inflated by speech that was never scored."""
+    path = tmp_path / "long_speech.wav"
+    quiet = np.random.RandomState(0).randn(SAMPLE_RATE).astype(np.float32) * 1e-4
+    t = np.linspace(0, 3, SAMPLE_RATE * 3, endpoint=False)
+    tone = (0.5 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+    sf.write(path, np.concatenate([quiet, tone]), SAMPLE_RATE)
+
+    overlay = saliency._speech_overlay(path, [], analysed_seconds=2.0)
+
+    assert overlay["speech_intervals"]
+    assert max(end for _, end in overlay["speech_intervals"]) <= 2.0
+
+
 # --- duration caps (DF-15) ------------------------------------------------
 
 
@@ -152,6 +249,7 @@ def test_spectrogram_padding_is_not_mistaken_for_audio(clip):
     adapter = SimpleNamespace(
         model=_LoudHalfSpectrogramModel(real_frames),
         spoof_index=1,
+        bonafide_index=0,
         analysis_window_seconds=10.24,
         feature_extractor=ASTFeatureExtractor(),
         device="cpu",
@@ -222,7 +320,7 @@ async def test_saliency_names_its_method(client, saliency_dataset, stub_model):
 
     assert payload["method"] == saliency.METHOD
     assert payload["method_label"] == saliency.METHOD_LABEL
-    assert payload["target"] == "spoof logit"
+    assert payload["target"] == saliency.TARGET
     assert payload["max_saliency_seconds"] == saliency.MAX_SALIENCY_SECONDS
 
 

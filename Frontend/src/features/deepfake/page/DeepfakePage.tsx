@@ -30,6 +30,9 @@ const MODEL_BLURBS: Record<string, string> = {
   "xlsr-deepfake": "listens to raw sound waves",
   "ast-fakeaudio": "reads the spectrogram like an image",
   "xlsr-mamba": "a state-space model over wav2vec2 features",
+  "w2v2-aasist": "a graph-attention network over wav2vec2 features",
+  "xlsr-sls": "weighs every wav2vec2 layer, not just the last",
+  "nes2net-x": "a tiny nested Res2Net over wav2vec2 features",
 };
 
 /** Dataset menu value for the built-in subset (custom ones use their name). */
@@ -447,7 +450,7 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
 
         <section id="your-voice" className="mx-auto max-w-[1600px] scroll-mt-14 px-4 py-4">
           <SectionTitle eyebrow="Bring your own" title={<>Test <span className="df-gradient-text">your own voice</span></>}>
-            Upload a clip or record one right here. It joins the page like any dataset clip: all three detectors, the
+            Upload a clip or record one right here. It joins the page like any dataset clip: every detector, the
             silence test, the heatmap and the voice map all work on it. Nobody knows its answer but you.
           </SectionTitle>
           <YourClips
@@ -537,7 +540,7 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
                   <motion.div key="locked" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
                     {[
                       { src: "/deepfake/silence-probe.png", title: "Voice or silence?", text: "Tests whether the verdict rests on the pauses rather than the voice." },
-                      { src: "/deepfake/saliency.png", title: "Where did it listen?", text: "A heatmap of the moments that pushed it towards synthetic." },
+                      { src: "/deepfake/saliency.png", title: "Where did it listen?", text: "A heatmap of the moments that moved its verdict most." },
                     ].map((item) => (
                       <div key={item.title} className="relative">
                         <FeatureImage src={item.src} alt="" className="h-28 opacity-50 grayscale" />

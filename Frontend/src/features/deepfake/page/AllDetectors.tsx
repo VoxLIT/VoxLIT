@@ -370,7 +370,7 @@ const HeatBlock = ({ result }: { result: DeepfakeSaliency }) => {
           />
         ))}
       </svg>
-      <p className="text-[11px] text-slate-500">Red: pushed towards synthetic. Blue underline: speech.</p>
+      <p className="text-[11px] text-slate-500">Red: moments that moved the verdict most. Blue underline: speech.</p>
       {verdict && (
         <p className={`text-xs font-semibold ${verdict.alarming ? "text-amber-300" : "text-emerald-300"}`}>{verdict.title}</p>
       )}
