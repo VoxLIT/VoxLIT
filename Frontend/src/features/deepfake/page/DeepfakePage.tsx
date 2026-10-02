@@ -34,6 +34,7 @@ const MODEL_BLURBS: Record<string, string> = {
 
 /** Dataset menu value for the built-in subset (custom ones use their name). */
 const BUILTIN = "__builtin__";
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const NAV = [
   { href: "#your-voice", label: "Your voice" },
@@ -252,6 +253,15 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
   // 16 kHz WAV in the browser, then stored as one of the visitor's clips).
   const uploadFromToolbar = async (files: FileList | null) => {
     for (const file of Array.from(files ?? [])) {
+      // Same limits as the "Test your own voice" uploader.
+      if (file.size > MAX_UPLOAD_BYTES) {
+        toast.error(`${file.name} is larger than 25 MB.`);
+        continue;
+      }
+      if (!file.type.startsWith("audio/") && !/\.(wav|mp3|m4a|flac|ogg)$/i.test(file.name)) {
+        toast.error(`Invalid file type: ${file.name}. Supported formats: WAV, MP3, M4A, FLAC, OGG`);
+        continue;
+      }
       try {
         const { wav } = await convertToWav(file);
         const clip = await uploadUserClip(wav, wavName(file.name), "upload");

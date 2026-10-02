@@ -17,7 +17,6 @@ import pytest
 import soundfile as sf
 
 from app.tasks.deepfake import custom_datasets, evaluation, metrics, silence_probe
-from app.tasks.deepfake import router as deepfake_router
 
 
 def _wav_bytes(seconds: float = 1.5, sample_rate: int = 16_000, amplitude: float = 0.3) -> bytes:
@@ -144,7 +143,7 @@ async def test_evaluation_needs_labels_then_works_in_both_conditions(client, stu
     assert bad.status_code == 400
 
 
-async def test_another_session_cannot_reach_a_dataset(client, monkeypatch):
+async def test_another_session_cannot_reach_a_dataset(client):
     uploaded = await _make(client, files=("real1",))
     clip_id = uploaded["uploaded_files"][0]["recording_id"]
     client.cookies.clear()

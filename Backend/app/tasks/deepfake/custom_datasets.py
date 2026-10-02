@@ -268,12 +268,6 @@ def resolve_clip_path(sid: str | None, clip_id: str) -> Path:
     raise DatasetNotFound(f"Unknown clip id: {clip_id}")
 
 
-def clip_display_name(sid: str | None, clip_id: str) -> str:
-    path = resolve_clip_path(sid, clip_id)
-    data = _read_json(path.with_suffix(".json")) or {}
-    return data.get("display_filename", clip_id)
-
-
 def _normalise_label(raw: str) -> str | None:
     word = raw.strip().lower()
     if word in BONAFIDE_WORDS:
@@ -293,7 +287,6 @@ def parse_label_file(text: str) -> dict[str, list[str]]:
     `clip01` all match the uploaded `clip01.mp3`.
     """
     labels: dict[str, list[str]] = {}
-    rejected = 0
     for row in csv.reader(io.StringIO(text)):
         if not row or not "".join(row).strip() or row[0].lstrip().startswith("#"):
             continue
@@ -304,15 +297,13 @@ def parse_label_file(text: str) -> dict[str, list[str]]:
             elif len(parts) >= 2:
                 filename, label, attack = parts[0], parts[1], parts[2] if len(parts) > 2 else "-"
             else:
-                rejected += 1
                 continue
         else:
             filename, label = row[0], row[1]
             attack = row[2].strip() if len(row) > 2 and row[2].strip() else "-"
         normalised = _normalise_label(label)
         if normalised is None:
-            rejected += 1  # a header row lands here too
-            continue
+            continue  # unreadable line; a header row lands here too
         if normalised == "spoof" and attack in {"", "-"}:
             attack = "spoof"
         labels[_stem(filename.strip())] = [attack if normalised == "spoof" else "-", normalised]
