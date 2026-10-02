@@ -94,26 +94,34 @@ See [STRUCTURE.md](STRUCTURE.md) for the task registry and for adding a new task
 
 VoxLIT is hosted on [Modal](https://modal.com). Model weights are stored on a persistent volume, so they download once and survive restarts. The Hugging Face token for gated models is provided as a Modal secret.
 
-```bash
-modal run deploy/modal_app.py::warm
-```
-
-```bash
-modal deploy deploy/modal_app.py
-```
-
-The first command downloads and tests every model; the second publishes the site.
-
 ## Development
 
 For contributors working on the codebase:
 
-```bash
-cd Frontend && npm install && npm run dev
-```
+**1. Frontend**
 
 ```bash
-cd Backend && docker compose up -d && pip install -r requirements.txt && uvicorn app.main:app --reload
+cd Frontend
+npm install
+npm run dev
+```
+
+**2. Redis** (Docker Desktop must be running)
+
+```bash
+cd Backend
+docker compose up -d
+```
+
+**3. Backend**
+
+```bash
+cd Backend
+python3.11 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+uvicorn app.main:app --reload
 ```
 
 | Command | Purpose |
