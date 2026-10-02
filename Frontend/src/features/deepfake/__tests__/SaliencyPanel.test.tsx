@@ -54,9 +54,9 @@ describe("SaliencyPanel", () => {
     await run();
 
     expect(
-      await screen.findByText(/Input gradient \(\|d spoof logit \/ d input\|\)/),
+      await screen.findByText(/SmoothGrad × input \(\|mean ∂margin\/∂x · x\|, 8 noisy passes\)/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/taken on the spoof logit/)).toBeInTheDocument();
+    expect(screen.getByText(/taken on the decision margin \(spoof logit − bonafide logit\)/)).toBeInTheDocument();
   });
 
   it("discloses that attribution is ranked within the clip only", async () => {

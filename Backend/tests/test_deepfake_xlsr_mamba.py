@@ -79,8 +79,10 @@ def test_model_c_is_registered_as_tier_b():
     assert service.get_model_spec("ast-fakeaudio").tier == "A"
 
 
-def test_all_three_models_are_registered():
-    assert set(service.MODEL_SPECS) == {"xlsr-deepfake", "ast-fakeaudio", "xlsr-mamba"}
+def test_all_six_models_are_registered():
+    assert set(service.MODEL_SPECS) == {
+        "xlsr-deepfake", "ast-fakeaudio", "xlsr-mamba", "w2v2-aasist", "xlsr-sls", "nes2net-x",
+    }
 
 
 # --- architecture ---------------------------------------------------------

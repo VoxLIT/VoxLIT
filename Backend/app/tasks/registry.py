@@ -44,7 +44,7 @@ TASKS: dict[str, dict] = {
     "deepfake": {
         "name": "Audio Deepfake Detection",
         "status": "active",
-        "models": ["xlsr-deepfake", "ast-fakeaudio", "xlsr-mamba"],
+        "models": ["xlsr-deepfake", "ast-fakeaudio", "xlsr-mamba", "w2v2-aasist", "xlsr-sls", "nes2net-x"],
         "datasets": ["asvspoof2019-la"],
     },
 }

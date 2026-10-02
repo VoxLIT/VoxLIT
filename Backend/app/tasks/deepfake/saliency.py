@@ -13,16 +13,31 @@ Feature 2 delivers by ablation, arrived at from the other direction.
 
 METHOD
 ------
-The gradient of the spoof logit with respect to the model's input, taken from
-the loaded model itself: one forward and one backward pass, no dataset and no
-labels. Magnitude is used, because a researcher asks "did this moment matter",
-not "which way did it push" — and the sign of a raw-waveform gradient flips
-with the carrier phase, so it carries no interpretable direction here.
+SmoothGrad x input on the decision margin (spoof logit minus bonafide logit),
+taken from the loaded model itself: no dataset and no labels.
 
-Integrated Gradients would be better founded but costs ~32 forward AND
-backward passes; on a CPU-only machine Model C alone takes ~9 s per pass, so
-it is out of reach. The method actually used is reported in the payload and
-shown in the interface (DF-15) rather than being implied.
+* Margin, not the spoof logit alone: on a clip the model calls real, the
+  spoof logit's gradient shows where the model would look to become MORE
+  fake, which is not why it decided. The margin is what the verdict reads.
+* x input: a bare gradient is SENSITIVITY ("what if this sample changed"),
+  not contribution. Near-silent stretches carry ~1% of the speech's
+  amplitude yet the models' gradients there run 40-100% as large, so a bare
+  gradient piles heat onto silence that holds no evidence. Multiplying by the
+  input weighs each moment by what is actually there.
+* SmoothGrad: the gradient is averaged over a few noisy copies of the input,
+  because a single raw-waveform gradient is too spiky to read.
+
+Magnitude is reported, because a researcher asks "did this moment matter",
+not "which way did it push" -- the sign of a raw-waveform term flips with the
+carrier phase, so it carries no interpretable direction here.
+
+Known bias, stated rather than hidden: x input scales with loudness, so it
+leans towards speech exactly as a bare gradient leans towards silence. Whether
+the SCORE depends on the silence is answered by Feature 2's ablation, not by
+this map. Integrated Gradients would be better founded but costs ~32 passes;
+on a CPU-only machine Model C alone takes ~9 s per pass, so it is out of
+reach. The method actually used is reported in the payload and shown in the
+interface (DF-15) rather than being implied.
 
 WHERE IT LIVES
 --------------
@@ -53,8 +68,20 @@ MAX_SALIENCY_SECONDS = int(os.getenv("MAX_SALIENCY_SECONDS", "12"))
 # on a waveform a few hundred pixels wide.
 DEFAULT_SEGMENTS = 60
 
-METHOD = "input-gradient"
-METHOD_LABEL = "Input gradient (|d spoof logit / d input|)"
+# Noisy passes averaged per clip. Each costs one forward AND backward pass.
+SMOOTHGRAD_SAMPLES = max(1, int(os.getenv("DEEPFAKE_SMOOTHGRAD_SAMPLES", "8")))
+# Noise standard deviation, as a fraction of the input's own standard deviation.
+SMOOTHGRAD_NOISE = 0.1
+# Fixed, so the same clip always yields the same map (results are cached).
+SMOOTHGRAD_SEED = 0
+
+# Bump the method name whenever the attribution's meaning changes: it is part
+# of the result cache key.
+METHOD = "smoothgrad-x-input-margin"
+METHOD_LABEL = (
+    f"SmoothGrad × input (|mean ∂margin/∂x · x|, {SMOOTHGRAD_SAMPLES} noisy passes)"
+)
+TARGET = "decision margin (spoof logit − bonafide logit)"
 
 
 class SaliencyUnavailable(RuntimeError):
@@ -78,8 +105,53 @@ def _real_frame_count(samples: int, sample_rate: int) -> int:
     return 0 if samples < window else 1 + (samples - window) // hop
 
 
+def _fold_tiled(values, real_samples: int):
+    """Map a tile-padded input's per-sample values back onto the real clip.
+
+    Tier B models tile a short clip until it fills their window, so sample i
+    of the clip appears at i, i + n, i + 2n, ... Its total effect is the sum
+    over those copies; dropping or stretching the copies would misplace it.
+    """
+    import numpy as np
+
+    if values.shape[0] <= real_samples:
+        return values
+    copies = -(-values.shape[0] // real_samples)
+    padded = np.zeros(copies * real_samples, dtype=values.dtype)
+    padded[: values.shape[0]] = values
+    return padded.reshape(copies, real_samples).sum(axis=0)
+
+
+def _smoothgrad(forward, target, adapter):
+    """Gradient of the decision margin, averaged over noisy copies of `target`."""
+    import torch
+
+    generator = torch.Generator().manual_seed(SMOOTHGRAD_SEED)
+    sigma = SMOOTHGRAD_NOISE * float(target.detach().std())
+    total = torch.zeros_like(target)
+    for _ in range(SMOOTHGRAD_SAMPLES):
+        noise = torch.randn(target.shape, generator=generator).to(target.device) * sigma
+        noisy = (target.detach() + noise).requires_grad_(True)
+        logits = forward(noisy)
+        margin = logits[0, adapter.spoof_index] - logits[0, adapter.bonafide_index]
+        # autograd.grad, not backward(): only the input's gradient is needed,
+        # and backward() would leave a ~1.2 GB .grad on every parameter of a
+        # 300M-parameter model that stays cached in memory afterwards.
+        gradient = (
+            torch.autograd.grad(margin, noisy, allow_unused=True)[0]
+            if margin.requires_grad
+            else None
+        )
+        if gradient is None:
+            raise SaliencyUnavailable(
+                "No gradient reached the model input, so no attribution can be produced."
+            )
+        total += gradient.detach()
+    return total / SMOOTHGRAD_SAMPLES
+
+
 def _attribution_over_time(adapter, audio_path: str | Path, max_seconds: float):
-    """|gradient| of the spoof logit w.r.t. the input, plus its time span.
+    """|SmoothGrad x input| of the decision margin, plus its time span.
 
     Returns (attribution per input position, seconds of audio analysed).
     Handles both tiers: a raw-waveform model gives one value per sample, a
@@ -87,7 +159,6 @@ def _attribution_over_time(adapter, audio_path: str | Path, max_seconds: float):
     time order, which is all the caller needs.
     """
     import numpy as np
-    import torch
 
     from .service import _load_waveform
 
@@ -109,37 +180,42 @@ def _attribution_over_time(adapter, audio_path: str | Path, max_seconds: float):
             waveform.squeeze(0).numpy(), sampling_rate=sample_rate, return_tensors="pt"
         )
         inputs = {name: value.to(adapter.device) for name, value in inputs.items()}
-        target = inputs["input_values"].requires_grad_(True)
-        logits = adapter.model(**inputs).logits
+        target = inputs.pop("input_values")
+
+        def forward(values):
+            return adapter.model(input_values=values, **inputs).logits
+
     else:
         # Tier B — our own architecture, fed the raw waveform.
-        prepared = adapter._xlsr_mamba.pad_or_tile(waveform.squeeze(0).numpy())
-        target = torch.from_numpy(prepared).float().unsqueeze(0).requires_grad_(True)
-        logits = adapter.model(target)
+        target = adapter.prepare_input(waveform.squeeze(0).numpy())
 
-    adapter.model.zero_grad(set_to_none=True)
-    logits[0, adapter.spoof_index].backward()
+        def forward(values):
+            return adapter.model(values)
 
-    if target.grad is None:
-        raise SaliencyUnavailable(
-            "No gradient reached the model input, so no attribution can be produced."
-        )
+    gradient = _smoothgrad(forward, target, adapter).squeeze(0).cpu().numpy()
+    values = target.detach().squeeze(0).cpu().numpy()
 
-    gradient = target.grad.detach().abs().squeeze(0).cpu().numpy()
     if gradient.ndim > 1:
-        # Spectrogram input (frames x mel bins): collapse the frequency axis,
-        # leaving one value per time frame.
-        gradient = gradient.sum(axis=-1)
+        # Spectrogram input (frames x mel bins): per-bin contribution, then
+        # collapse the frequency axis, leaving one value per time frame.
+        attribution = np.abs(gradient * values).sum(axis=-1)
         # AST pads every clip to a fixed frame count (1024 -> 10.24 s). Those
         # padding frames are not audio: keep only the frames the clip filled,
         # or a 3 s clip's attribution gets squeezed into its first second.
         real_frames = _real_frame_count(waveform.shape[1], sample_rate)
-        gradient = gradient[: max(1, min(real_frames, gradient.shape[0]))]
+        attribution = attribution[: max(1, min(real_frames, attribution.shape[0]))]
+    else:
+        # A clip shorter than a Tier B window is tiled to fill it: fold every
+        # copy's gradient back onto the original sample before weighting it,
+        # or the copies get stretched over the real clip's timeline.
+        real_samples = waveform.shape[1]
+        gradient = _fold_tiled(gradient, real_samples)
+        attribution = np.abs(gradient * values[:real_samples])
 
-    if not np.isfinite(gradient).all():
+    if not np.isfinite(attribution).all():
         raise SaliencyUnavailable("Attribution contained non-finite values.")
 
-    return gradient.astype(np.float32), analysed_seconds
+    return attribution.astype(np.float32), analysed_seconds
 
 
 def _to_segments(attribution, analysed_seconds: float, segment_count: int):
@@ -185,7 +261,9 @@ def _to_segments(attribution, analysed_seconds: float, segment_count: int):
     return segments, [round(float(value), 6) for value in normalised]
 
 
-def _speech_overlay(audio_path: str | Path, segments: list[dict]) -> dict:
+def _speech_overlay(
+    audio_path: str | Path, segments: list[dict], analysed_seconds: float
+) -> dict:
     """Where the speech is, and how much attribution lands inside it.
 
     Reuses Feature 2's segmentation so both views draw the same boundaries.
@@ -199,9 +277,12 @@ def _speech_overlay(audio_path: str | Path, segments: list[dict]) -> dict:
     waveform, sample_rate = _load_waveform(audio_path)
     segmentation = segment_speech(waveform.squeeze(0).numpy(), sample_rate)
 
+    # Only the speech inside the analysed window: speech after the cut was never
+    # attributed, and counting it would inflate the share the view compares to.
     intervals = [
-        (start / sample_rate, end / sample_rate)
+        (start / sample_rate, min(end / sample_rate, analysed_seconds))
         for start, end in segmentation.speech_intervals
+        if start / sample_rate < analysed_seconds
     ]
 
     def inside_speech(segment: dict) -> bool:
@@ -246,13 +327,14 @@ def generate_saliency(
         "model_label": spec.label,
         # DF-15: the method is named, not implied.
         "method_label": METHOD_LABEL,
-        "target": "spoof logit",
+        "target": TARGET,
+        "smoothgrad_samples": SMOOTHGRAD_SAMPLES,
         "max_saliency_seconds": MAX_SALIENCY_SECONDS,
         "analysis_window_seconds": getattr(adapter, "analysis_window_seconds", None),
         "truncated": analysed_seconds < _clip_seconds(audio_path),
         "normalised": True,
         # Lets the view show whether the heat sits on speech or on silence.
-        **_speech_overlay(audio_path, segments),
+        **_speech_overlay(audio_path, segments, analysed_seconds),
     }
 
 

@@ -19,7 +19,7 @@ const WIDTH = 640;
 /**
  * Feature 3 — waveform-aligned saliency (SRS DF-14, DF-15).
  *
- * The gradient of the spoof logit with respect to the input, drawn as heat
+ * SmoothGrad x input on the decision margin (spoof minus bonafide logit), drawn as heat
  * along the waveform so the moments the model reacted to are visible in
  * time. Speech regions are shaded, because the question this view exists to
  * answer is whether the bright regions sit on the voice or on the silence.
@@ -125,7 +125,7 @@ export const SaliencyPanel = ({ model, modelLabel, recordingId }: SaliencyPanelP
 
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Which moments pushed the model toward &ldquo;spoof&rdquo;, drawn as heat along the
+          Which moments moved the model&apos;s decision most, drawn as heat along the
           waveform. If the bright regions sit on silence rather than on the voice, the score
           was never evidence about the speech.
         </p>

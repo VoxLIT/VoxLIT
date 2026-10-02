@@ -20,7 +20,7 @@ import threading
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Callable, Protocol
 
 TARGET_SAMPLE_RATE = 16_000
 
@@ -58,6 +58,8 @@ class DeepfakeModelSpec:
     # path. "B" = weights only, needs architecture code we maintain ourselves
     # (see xlsr_mamba.py). Decides which adapter get_model builds.
     tier: str = "A"
+    # Tier B only: which of our architecture modules rebuilds the network.
+    architecture: str = ""
 
 
 MODEL_SPECS: dict[str, DeepfakeModelSpec] = {
@@ -121,6 +123,60 @@ MODEL_SPECS: dict[str, DeepfakeModelSpec] = {
         recommended=False,
         gated=False,
         tier="B",
+        architecture="xlsr-mamba",
+    ),
+    # Models D-F share Model A/C's XLS-R 300M front end and differ only in
+    # the back end, which makes them a controlled comparison: same features,
+    # different reader. All three come from the SSL_Anti-spoofing training
+    # code, were trained on ASVspoof 2019 LA, and are the authors' released
+    # checkpoints as re-hosted (MIT, unmodified) by the Speech DF Arena
+    # maintainers. E and F are the two best open-source XLS-R systems in
+    # Speech DF Arena (Dowerah et al., arXiv:2509.02859, Table 3) after
+    # XLSR-Mamba (already Model C); the Arena's #2, TCM, is skipped because
+    # its weights are only published on a OneDrive share. Pinned to commits
+    # for the same reason as Model B.
+    #
+    # Model D — Tak et al., Odyssey 2022 (arXiv:2202.12233).
+    "w2v2-aasist": DeepfakeModelSpec(
+        key="w2v2-aasist",
+        label="Wav2Vec2-AASIST (Model D)",
+        model_id="SpeechAntiSpoofingBenchmarks/W2V2-AASIST",
+        revision="196128e5a5101d5cb6ac7701597891bc7de7e7b5",
+        sampling_rate=TARGET_SAMPLE_RATE,
+        threshold=DEFAULT_THRESHOLD,
+        threshold_calibrated=False,
+        recommended=False,
+        gated=False,
+        tier="B",
+        architecture="w2v2-aasist",
+    ),
+    # Model E — Zhang et al., ACM MM 2024. Arena rank 1 among open source.
+    "xlsr-sls": DeepfakeModelSpec(
+        key="xlsr-sls",
+        label="XLSR-SLS (Model E)",
+        model_id="SpeechAntiSpoofingBenchmarks/XLSR-SLS",
+        revision="6b99ebc9d9240571c4fe21b364d49845ce9b6bd9",
+        sampling_rate=TARGET_SAMPLE_RATE,
+        threshold=DEFAULT_THRESHOLD,
+        threshold_calibrated=False,
+        recommended=False,
+        gated=False,
+        tier="B",
+        architecture="xlsr-sls",
+    ),
+    # Model F — Liu et al., IEEE TIFS 2025 (arXiv:2504.05657).
+    "nes2net-x": DeepfakeModelSpec(
+        key="nes2net-x",
+        label="Nes2Net-X (Model F)",
+        model_id="SpeechAntiSpoofingBenchmarks/Nes2Net",
+        revision="404a29bb753d661ed4707586f81d2e036461620e",
+        sampling_rate=TARGET_SAMPLE_RATE,
+        threshold=DEFAULT_THRESHOLD,
+        threshold_calibrated=False,
+        recommended=False,
+        gated=False,
+        tier="B",
+        architecture="nes2net-x",
     ),
 }
 
@@ -410,55 +466,110 @@ class _HFAudioClassifierAdapter:
         return result
 
 
-class _XLSRMambaAdapter:
-    """Tier B adapter for Model C.
+@dataclass(frozen=True, slots=True)
+class _Architecture:
+    """What a Tier B checkpoint cannot tell us, supplied per network.
+
+    `load` rebuilds the network and loads the weights strictly; `prepare`
+    is the reference eval-time windowing (truncate, or tile-repeat a short
+    clip -- never zero-pad); `head` returns the final linear layer, whose
+    input is the embedding view's vector.
+    """
+
+    load: Callable[..., Any]
+    window_samples: int
+    prepare: Callable[[Any], Any]
+    head: Callable[[Any], Any]
+    spoof_index: int
+    bonafide_index: int
+
+
+def _architecture(name: str) -> _Architecture:
+    """Import lazily: each module pulls in torch and builds a 300M network."""
+    if name == "xlsr-mamba":
+        from . import xlsr_mamba
+
+        return _Architecture(
+            load=xlsr_mamba.load_xlsr_mamba,
+            window_samples=xlsr_mamba.EVAL_CUT_SAMPLES,
+            prepare=xlsr_mamba.pad_or_tile,
+            head=lambda model: model.conformer.classifier,
+            # NOT read from the checkpoint: its config.json is empty. Taken
+            # from the reference training code, where genSpoof_list labels
+            # bona fide as 1 and produce_evaluation_file scores with
+            # batch_out[:, 1].
+            spoof_index=xlsr_mamba.SPOOF_INDEX,
+            bonafide_index=xlsr_mamba.BONAFIDE_INDEX,
+        )
+
+    from . import nes2net, ssl_frontend, w2v2_aasist, xlsr_sls
+
+    modules = {"w2v2-aasist": w2v2_aasist, "xlsr-sls": xlsr_sls, "nes2net-x": nes2net}
+    if name not in modules:
+        raise DeepfakeModelUnavailable(f"No Tier B architecture named '{name}'.")
+    return _Architecture(
+        load=modules[name].load,
+        window_samples=ssl_frontend.EVAL_CUT_SAMPLES,
+        prepare=ssl_frontend.pad_window,
+        head=lambda model: model.classifier,
+        # Same SSL_Anti-spoofing convention as Model C: index 1 = bona fide.
+        spoof_index=ssl_frontend.SPOOF_INDEX,
+        bonafide_index=ssl_frontend.BONAFIDE_INDEX,
+    )
+
+
+class _TierBAdapter:
+    """Tier B adapter for Models C-F.
 
     Same `score()` contract as the Tier A adapter, but everything the
     transformers checkpoint would have described is supplied by us: the
-    architecture (xlsr_mamba.XLSRMamba), the preprocessing (tile-pad to
-    66800 samples, no normalisation) and the label order.
+    architecture, the preprocessing (tile-pad to a fixed window, no
+    normalisation) and the label order. See _Architecture.
     """
 
     def __init__(self, spec: DeepfakeModelSpec) -> None:
         from app.core.settings import settings
 
-        from . import xlsr_mamba
-
         self.spec = spec
-        self._xlsr_mamba = xlsr_mamba
+        self.architecture = _architecture(spec.architecture)
         try:
-            self.model = xlsr_mamba.load_xlsr_mamba(
+            self.model = self.architecture.load(
                 spec.model_id, revision=spec.revision, token=settings.HF_TOKEN
             )
         except Exception as error:
             raise DeepfakeModelUnavailable(_load_failure_message(spec, error)) from error
 
-        # NOT read from the checkpoint: its config.json is empty. Taken from
-        # the reference training code, where genSpoof_list labels bona fide
-        # as 1 and produce_evaluation_file scores with batch_out[:, 1].
-        self.spoof_index = xlsr_mamba.SPOOF_INDEX
-        self.bonafide_index = xlsr_mamba.BONAFIDE_INDEX
+        self.spoof_index = self.architecture.spoof_index
+        self.bonafide_index = self.architecture.bonafide_index
         self.id2label = {self.spoof_index: "spoof", self.bonafide_index: "bonafide"}
         self.analysis_window_seconds = (
-            xlsr_mamba.EVAL_CUT_SAMPLES / float(spec.sampling_rate)
+            self.architecture.window_samples / float(spec.sampling_rate)
         )
+
+    def prepare_input(self, samples):
+        """The reference eval windowing, as a (1, window) float tensor."""
+        import torch
+
+        prepared = self.architecture.prepare(samples)
+        return torch.from_numpy(prepared).float().unsqueeze(0)
 
     def score(self, audio_path: str | Path, with_embedding: bool = False) -> dict:
         import torch
 
         waveform, sample_rate = _load_waveform(audio_path)
         duration = waveform.shape[1] / sample_rate
-        truncated = waveform.shape[1] > self._xlsr_mamba.EVAL_CUT_SAMPLES
+        truncated = waveform.shape[1] > self.architecture.window_samples
 
         # Tile-repeat short clips rather than zero-padding them — the
-        # reference does this, and zero padding scores differently.
-        prepared = self._xlsr_mamba.pad_or_tile(waveform.squeeze(0).numpy())
-        batch = torch.from_numpy(prepared).float().unsqueeze(0)
+        # references do this, and zero padding scores differently.
+        batch = self.prepare_input(waveform.squeeze(0).numpy())
 
-        head = self.model.conformer.classifier if with_embedding else None
+        head = self.architecture.head(self.model) if with_embedding else None
         with torch.inference_mode(), _capture_head_input(head) as captured:
             logits = self.model(batch)
 
+        # XLSR-SLS emits log-probabilities rather than logits; softmax gives
+        # the same probabilities back either way.
         probabilities = torch.softmax(logits, dim=-1).squeeze(0)
 
         result = {
@@ -505,7 +616,7 @@ def get_model(model_key: str) -> DeepfakeAdapter:
     with _LOAD_LOCK:
         if model_key not in _MODEL_CACHE:
             builder = (
-                _XLSRMambaAdapter if spec.tier == "B" else _HFAudioClassifierAdapter
+                _TierBAdapter if spec.tier == "B" else _HFAudioClassifierAdapter
             )
             _MODEL_CACHE[model_key] = builder(spec)
         return _MODEL_CACHE[model_key]

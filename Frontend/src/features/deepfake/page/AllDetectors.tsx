@@ -41,8 +41,8 @@ interface AllDetectorsProps {
  * disagree often — that disagreement is the most honest thing this page can
  * show about a clip nobody has labelled, like the visitor's own recording.
  *
- * Jobs run one at a time: each detector is a large model, and loading three
- * at once would compete for the same memory.
+ * Jobs run one at a time: each detector is a large model, and loading them
+ * all at once would compete for the same memory.
  */
 export const AllDetectors = ({ models, recording }: AllDetectorsProps) => {
   const { REAL, FAKE } = usePalette();
@@ -370,7 +370,7 @@ const HeatBlock = ({ result }: { result: DeepfakeSaliency }) => {
           />
         ))}
       </svg>
-      <p className="text-[11px] text-slate-500">Red: pushed towards synthetic. Blue underline: speech.</p>
+      <p className="text-[11px] text-slate-500">Red: moments that moved the verdict most. Blue underline: speech.</p>
       {verdict && (
         <p className={`text-xs font-semibold ${verdict.alarming ? "text-amber-300" : "text-emerald-300"}`}>{verdict.title}</p>
       )}

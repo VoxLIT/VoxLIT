@@ -115,9 +115,9 @@ export const saliency: DeepfakeSaliency = {
   model: "xlsr-deepfake",
   model_label: "wav2vec2 XLS-R (Model A)",
   recording_id: "rec_1070252",
-  method: "input-gradient",
-  method_label: "Input gradient (|d spoof logit / d input|)",
-  target: "spoof logit",
+  method: "smoothgrad-x-input-margin",
+  method_label: "SmoothGrad × input (|mean ∂margin/∂x · x|, 8 noisy passes)",
+  target: "decision margin (spoof logit − bonafide logit)",
   segments: [
     { start_time: 0.0, end_time: 1.14, saliency: 1.0, intensity: 1.0 },
     { start_time: 1.14, end_time: 2.28, saliency: 0.31, intensity: 0.31 },

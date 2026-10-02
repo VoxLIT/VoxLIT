@@ -82,7 +82,7 @@ export const ListeningHeatmap = ({ model, recordingId }: { model: string; record
           <FeatureImage
             src="/deepfake/saliency.png"
             alt="A spectrogram of speech, showing energy over time and pitch"
-            caption="A heatmap over the sound shows which moments pushed the detector towards synthetic."
+            caption="A heatmap over the sound shows which moments moved the detector's verdict most."
             className="h-32"
           />
           <PrimaryButton onClick={run} busy={running} className="w-full">
