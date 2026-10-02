@@ -30,6 +30,18 @@ from .service import (
     get_model_spec,
     run_detection,
 )
+from .silence_probe import SILENCE_TOP_DB, score_trimmed
+
+# The two evaluation conditions. "silence_trimmed" re-scores every clip with
+# its leading and trailing non-speech removed (the silence probe's middle
+# column), the ablation Müller et al. (ASVspoof 2021 Workshop, "Speech is Silver,
+# Silence is Golden") used to show that ASVspoof 2019 LA detectors can score
+# well by reading silence length. Reporting both is what makes the EER
+# defensible: the gap between them is the size of the shortcut.
+CONDITIONS = {
+    "as_distributed": "As distributed (clips unmodified)",
+    "silence_trimmed": f"Silence trimmed (outer non-speech below -{SILENCE_TOP_DB} dB removed)",
+}
 
 # Demo files are static, so scores stay valid for as long as the model and
 # threshold version do.
@@ -42,15 +54,20 @@ def per_clip_cache_key(model_key: str) -> str:
     return f"df:{model_key}:{THRESHOLD_VERSION}"
 
 
-async def _score_one(model_key: str, path) -> dict:
+def trimmed_cache_key(model_key: str) -> str:
+    return f"df-trimmed:{model_key}:{THRESHOLD_VERSION}:{SILENCE_TOP_DB}"
+
+
+async def _score_one(model_key: str, path, condition: str = "as_distributed") -> dict:
     audio_hash = await run_in_threadpool(file_sha256, path)
-    cache_key = per_clip_cache_key(model_key)
+    trimmed = condition == "silence_trimmed"
+    cache_key = trimmed_cache_key(model_key) if trimmed else per_clip_cache_key(model_key)
 
     cached = await get_result(cache_key, audio_hash)
     if cached is not None:
         return cached
 
-    payload = await run_in_threadpool(run_detection, model_key, path)
+    payload = await run_in_threadpool(score_trimmed if trimmed else run_detection, model_key, path)
     await cache_result(cache_key, audio_hash, payload, ttl=SCORE_TTL_SECONDS)
     return payload
 
@@ -81,21 +98,39 @@ def _attack_summary(rows: list[dict]) -> list[dict]:
     return summary
 
 
-async def evaluate_dataset(model_key: str, bins: int = HISTOGRAM_BINS) -> dict:
-    """Score every labelled recording and assemble Feature 1's payload."""
+def builtin_clips() -> tuple[list[tuple[str, object]], dict[str, tuple[str, str]], str]:
+    """The ASVspoof subset as (stem, path) pairs, its protocol, and its id."""
+    clips = [
+        (recording.display_filename.rsplit(".", 1)[0], resolve_recording_path(recording.recording_id))
+        for recording in list_recordings()
+    ]
+    return clips, load_ground_truth(), DATASET_ID
+
+
+async def evaluate_dataset(
+    model_key: str,
+    bins: int = HISTOGRAM_BINS,
+    condition: str = "as_distributed",
+    source: tuple[list[tuple[str, object]], dict[str, tuple[str, str]], str] | None = None,
+) -> dict:
+    """Score every labelled recording and assemble Feature 1's payload.
+
+    `source` defaults to the built-in subset; a custom dataset passes its own
+    clips and label map (see custom_datasets.labelled_clips).
+    """
+    if condition not in CONDITIONS:
+        raise ValueError(f"condition must be one of: {', '.join(CONDITIONS)}.")
     spec = get_model_spec(model_key)
-    truth = load_ground_truth()
-    recordings = list_recordings()
+    clips, truth, dataset_id = source if source is not None else builtin_clips()
 
     rows: list[dict] = []
-    for recording in recordings:
-        stem = recording.display_filename.rsplit(".", 1)[0]
-        entry = truth.get(stem)
+    for stem, path in clips:
+        entry = truth.get(stem) or truth.get(stem.lower())
         if entry is None:
             # A clip with no protocol line cannot be scored against anything.
             continue
         attack, label = entry
-        payload = await _score_one(model_key, resolve_recording_path(recording.recording_id))
+        payload = await _score_one(model_key, path, condition)
         rows.append({"label": label, "attack": attack, "score": payload["spoof_probability"]})
 
     bonafide = [row["score"] for row in rows if row["label"] == "bonafide"]
@@ -106,21 +141,42 @@ async def evaluate_dataset(model_key: str, bins: int = HISTOGRAM_BINS) -> dict:
     computed = metrics.compute_metrics(bonafide, spoof)
 
     operating_far, operating_frr = metrics.rates_at(spec.threshold, bonafide, spoof)
+    ci_low, ci_high = metrics.bootstrap_eer_interval(bonafide, spoof)
+    zero_bound = metrics.zero_error_upper_bound(len(bonafide), len(spoof))
 
     return {
         "model": model_key,
         "model_label": spec.label,
-        "dataset_id": DATASET_ID,
+        "dataset_id": dataset_id,
+        "condition": condition,
+        "condition_label": CONDITIONS[condition],
         "scored": len(rows),
+        "unlabelled_skipped": len(clips) - len(rows),
         "bonafide_count": computed.bonafide_count,
         "spoof_count": computed.spoof_count,
         "eer_percent": computed.eer_percent,
         "eer_threshold": computed.eer_threshold,
+        # Uncertainty. With n clips per class each error moves a rate by 1/n,
+        # so the EER is only resolved to half of that.
+        "eer_ci_percent": [round(ci_low * 100, 3), round(ci_high * 100, 3)],
+        "eer_zero_upper_bound_percent": round(zero_bound * 100, 3),
+        "eer_resolution_percent": round(50.0 / min(len(bonafide), len(spoof)), 3),
+        "confidence_level": metrics.CONFIDENCE,
+        "bootstrap_resamples": metrics.BOOTSTRAP_RESAMPLES,
+        "roc_auc": round(metrics.roc_auc(bonafide, spoof), 6),
+        "score_statistics": {
+            "bonafide": metrics.score_summary(bonafide),
+            "spoof": metrics.score_summary(spoof),
+        },
+        "confusion": {
+            "operating": metrics.confusion_at(spec.threshold, bonafide, spoof),
+            "eer": metrics.confusion_at(computed.eer_threshold, bonafide, spoof),
+        },
         # SRS DF-9: a threshold is only meaningful with its dataset attached.
         "threshold_provenance": (
-            f"Equal error rate on {DATASET_ID} "
-            f"({computed.bonafide_count} genuine / {computed.spoof_count} spoofed clips). "
-            "Thresholds do not transfer between datasets."
+            f"Equal error rate on {dataset_id} "
+            f"({computed.bonafide_count} genuine / {computed.spoof_count} spoofed clips, "
+            f"{CONDITIONS[condition].lower()}). Thresholds do not transfer between datasets."
         ),
         "distributions": {
             "bonafide": metrics.score_histogram(bonafide, bins=bins),

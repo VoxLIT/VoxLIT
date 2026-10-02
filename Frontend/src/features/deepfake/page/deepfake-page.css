@@ -67,6 +67,35 @@
   font-family: inherit;
   letter-spacing: -0.01em;
 }
+
+/* ── Type scale matched to the other task pages ───────────────────────────
+   The console's panel titles are 13px / 600 with tight tracking, table heads
+   11px / 500 in the muted colour, and nothing is heavier than semibold. Only
+   type changes here; no element moves. */
+.df-page .font-bold { font-weight: 600; }
+.df-page h1 {
+  font-size: 1.125rem;
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.df-page h2,
+.df-page h3,
+.df-page h4 {
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.df-page th {
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+}
+.df-page .text-lg { font-size: 0.875rem; }
+.df-page .font-mono,
+.df-page .tabular-nums { font-variant-numeric: tabular-nums; }
+/* The toolbar takes the console's own colours, not the page's re-mapped ones. */
+.df-page .df-toolbar .text-foreground { color: hsl(var(--foreground)); }
 .df-page .font-mono {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }

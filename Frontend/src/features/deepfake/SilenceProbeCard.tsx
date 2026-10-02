@@ -235,8 +235,11 @@ export function readProbeVerdict(result: SilenceProbeResult) {
   const { original, trimmed, non_speech: nonSpeech } = result.variants;
   const base = original.spoof_probability ?? 0;
 
+  // A silence-only score on less than the reliability floor is shown, but it
+  // is not strong enough evidence to accuse the detector on its own.
   const silenceAloneAccuses =
     nonSpeech.applicable &&
+    nonSpeech.reliable !== false &&
     nonSpeech.spoof_probability !== null &&
     nonSpeech.spoof_probability >= result.threshold;
 

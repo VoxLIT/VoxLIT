@@ -1,5 +1,5 @@
 import { API_BASE } from "@/lib/api";
-import type { UserClip } from "../types";
+import type { CustomDataset, RecordingInfo, UserClip } from "../types";
 
 /** POST to one of the deepfake task's endpoints and unwrap FastAPI's `detail`. */
 export async function postDeepfake<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
@@ -18,10 +18,15 @@ export async function postDeepfake<T>(path: string, body: unknown, signal?: Abor
 /** The visitor's own clips carry an `up_` id; everything else is a demo clip. */
 export const isUserClip = (recordingId: string) => recordingId.startsWith("up_");
 
+/** Clips in one of the visitor's custom datasets carry a `cd_` id. */
+export const isCustomDatasetClip = (recordingId: string) => recordingId.startsWith("cd_");
+
 export const audioUrlFor = (recordingId: string) =>
   isUserClip(recordingId)
     ? `${API_BASE}/tasks/deepfake/uploads/${encodeURIComponent(recordingId)}/audio`
-    : `${API_BASE}/tasks/deepfake/dataset/recordings/${encodeURIComponent(recordingId)}/audio`;
+    : isCustomDatasetClip(recordingId)
+      ? `${API_BASE}/tasks/deepfake/datasets/clips/${encodeURIComponent(recordingId)}/audio`
+      : `${API_BASE}/tasks/deepfake/dataset/recordings/${encodeURIComponent(recordingId)}/audio`;
 
 async function unwrap<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => ({}));
@@ -62,3 +67,49 @@ export const formatSeconds = (seconds: number | null | undefined) =>
 
 export const formatBytes = (bytes: number) =>
   bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(2)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+// ── Custom datasets (Manage Datasets) ───────────────────────────────────────
+
+const datasetUrl = (name?: string, rest = "") =>
+  `${API_BASE}/tasks/deepfake/datasets${name !== undefined ? `/${encodeURIComponent(name)}` : ""}${rest}`;
+
+export interface DatasetLimits {
+  max_datasets: number;
+  max_files_per_dataset: number;
+  max_file_mb: number;
+  ttl_days: number;
+}
+
+export async function listDatasets(): Promise<{ datasets: CustomDataset[]; limits: DatasetLimits }> {
+  return unwrap(await fetch(datasetUrl(), { credentials: "include" }));
+}
+
+export async function createDataset(name: string): Promise<CustomDataset> {
+  const form = new FormData();
+  form.append("dataset_name", name);
+  return unwrap(await fetch(datasetUrl(), { method: "POST", credentials: "include", body: form }));
+}
+
+export async function deleteDataset(name: string): Promise<void> {
+  await unwrap(await fetch(datasetUrl(name), { method: "DELETE", credentials: "include" }));
+}
+
+export async function listDatasetRecordings(name: string): Promise<RecordingInfo[]> {
+  return (await unwrap<{ recordings: RecordingInfo[] }>(await fetch(datasetUrl(name, "/recordings"), { credentials: "include" })))
+    .recordings;
+}
+
+export async function uploadDatasetFiles(
+  name: string,
+  files: File[],
+): Promise<{ uploaded_files: RecordingInfo[]; errors: { filename: string; error: string }[] }> {
+  const form = new FormData();
+  files.forEach((file) => form.append("files", file, file.name));
+  return unwrap(await fetch(datasetUrl(name, "/files"), { method: "POST", credentials: "include", body: form }));
+}
+
+export async function uploadDatasetLabels(name: string, file: File): Promise<CustomDataset> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  return unwrap(await fetch(datasetUrl(name, "/labels"), { method: "POST", credentials: "include", body: form }));
+}

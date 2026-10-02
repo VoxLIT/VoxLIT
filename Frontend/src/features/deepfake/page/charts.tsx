@@ -291,11 +291,19 @@ export const DetChart = ({
 
   const ordered = useMemo(() => [...points].sort((a, b) => a.threshold - b.threshold), [points]);
 
+  // A rate of exactly 0 has no place on a normal-deviate axis (probit(0) is
+  // -inf). Zeros are drawn on a floor kept well clear of the smallest real
+  // tick, labelled "0" and set off by an axis break, so a 0 % point can never
+  // be read as 0.5 %.
+  const hasZero = useMemo(
+    () => ordered.some((point) => point.false_acceptance_rate === 0 || point.false_rejection_rate === 0),
+    [ordered],
+  );
   const floor = useMemo(() => {
     const rates = ordered.flatMap((point) => [point.false_acceptance_rate, point.false_rejection_rate]).filter((rate) => rate > 0);
     const smallest = rates.length ? Math.min(...rates) : 0.01;
-    return Math.max(0.001, smallest / 2);
-  }, [ordered]);
+    return Math.max(0.0005, smallest / (hasZero ? 4 : 2));
+  }, [ordered, hasZero]);
 
   const lo = scale === "probit" ? probit(floor) : 0;
   const hi = scale === "probit" ? probit(PROBIT_MAX) : 1;
@@ -306,11 +314,18 @@ export const DetChart = ({
   };
   const x = (rate: number) => M.left + unit(rate) * plot;
   const y = (rate: number) => M.top + (1 - unit(rate)) * plotH;
-  const ticks = scale === "probit" ? PROBIT_TICKS.filter((tick) => tick >= floor * 0.999) : LINEAR_TICKS;
+  const zeroTick = scale === "probit" && hasZero;
+  const ticks =
+    scale === "probit"
+      ? [...(zeroTick ? [floor] : []), ...PROBIT_TICKS.filter((tick) => tick >= floor * (zeroTick ? 1.6 : 0.999))]
+      : LINEAR_TICKS;
   const tickLabel = (tick: number) => {
+    if (zeroTick && tick === floor) return "0";
     const percent = tick * 100;
     return percent < 1 ? percent.toFixed(1) : percent.toFixed(0);
   };
+  // Axis-break marks between the "0" floor and the first real tick.
+  const breakAt = zeroTick ? (unit(floor) + unit(ticks[1] ?? floor * 2)) / 2 : null;
 
   const path = ordered
     .map((point, index) => `${index ? "L" : "M"} ${x(point.false_rejection_rate).toFixed(1)} ${y(point.false_acceptance_rate).toFixed(1)}`)
@@ -338,7 +353,7 @@ export const DetChart = ({
     if (prefer === "below") return { ...side, y: fitsBelow ? py + 17 : py - 10 };
     return { ...side, y: fitsAbove ? py - 10 : py + 17 };
   };
-  const eerText = `EER = ${eerPercent.toFixed(1)}%`;
+  const eerText = `EER = ${eerPercent.toFixed(2)}%`;
   const liveText = `τ = ${threshold.toFixed(3)}`;
   const eerLabel = place(eerX, eerY, eerText.length, "above");
   const crowded = Math.hypot(eerX - liveX, eerY - liveY) < 40;
@@ -400,6 +415,16 @@ export const DetChart = ({
           />
         </g>
         <rect x={M.left} y={M.top} width={plot} height={plotH} fill="none" stroke={ink(0.3)} />
+        {breakAt !== null && (
+          <g stroke={ink(0.55)} strokeWidth={1.2} fill="none">
+            {/* x axis break */}
+            <rect x={M.left + breakAt * plot - 4} y={M.top + plotH - 5} width={8} height={10} fill={CANVAS} stroke="none" />
+            <path d={`M ${M.left + breakAt * plot - 5} ${M.top + plotH + 5} l 4 -10 M ${M.left + breakAt * plot + 1} ${M.top + plotH + 5} l 4 -10`} />
+            {/* y axis break */}
+            <rect x={M.left - 5} y={M.top + (1 - breakAt) * plotH - 4} width={10} height={8} fill={CANVAS} stroke="none" />
+            <path d={`M ${M.left - 5} ${M.top + (1 - breakAt) * plotH + 5} l 10 -4 M ${M.left - 5} ${M.top + (1 - breakAt) * plotH + 1} l 10 -4`} />
+          </g>
+        )}
 
         <circle cx={eerX} cy={eerY} r={5} fill={CANVAS} stroke={INK} strokeWidth={1.75} />
         <text x={eerLabel.x} y={eerLabel.y} textAnchor={eerLabel.anchor} fontSize={11} fontWeight={500} fill={INK} style={NUMERIC} {...HALO}>

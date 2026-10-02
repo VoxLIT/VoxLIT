@@ -87,6 +87,21 @@ export interface DeepfakeEvaluation {
 
   eer_percent: number;
   eer_threshold: number;
+  /** "as_distributed" or "silence_trimmed" — see evaluation.CONDITIONS. */
+  condition?: EvaluationCondition;
+  condition_label?: string;
+  unlabelled_skipped?: number;
+  /** Stratified percentile bootstrap interval for the EER, in percent. */
+  eer_ci_percent?: [number, number];
+  /** Exact one-sided bound on the EER when no clip is wrong, in percent. */
+  eer_zero_upper_bound_percent?: number;
+  /** Half of 1/n: the smallest EER step this many clips can resolve. */
+  eer_resolution_percent?: number;
+  confidence_level?: number;
+  bootstrap_resamples?: number;
+  roc_auc?: number;
+  score_statistics?: { bonafide: ScoreStatistics; spoof: ScoreStatistics };
+  confusion?: { operating: Confusion; eer: Confusion };
   /** SRS DF-9 — a threshold means nothing without the dataset it came from. */
   threshold_provenance: string;
 
@@ -104,11 +119,53 @@ export interface DeepfakeEvaluation {
   per_attack: AttackSummary[];
 }
 
+export type EvaluationCondition = "as_distributed" | "silence_trimmed";
+
+export interface ScoreStatistics {
+  count: number;
+  mean: number;
+  median: number;
+  standard_deviation: number;
+  minimum: number;
+  maximum: number;
+}
+
+/** Counts at one threshold, spoof as the positive class. */
+export interface Confusion {
+  threshold: number;
+  true_positives: number;
+  false_negatives: number;
+  false_positives: number;
+  true_negatives: number;
+  accuracy: number;
+  balanced_accuracy: number;
+  precision: number;
+  recall: number;
+  specificity: number;
+  f1: number;
+  false_acceptance_rate: number;
+  false_acceptance_ci: [number, number];
+  false_rejection_rate: number;
+  false_rejection_ci: [number, number];
+}
+
+/** A researcher's own dataset (Manage Datasets). Label COUNTS only. */
+export interface CustomDataset {
+  dataset_name: string;
+  created_at: number | null;
+  updated_at: number | null;
+  total_files: number;
+  total_duration_seconds: number;
+  labels: { provided: boolean; matched_files: number; bonafide: number; spoof: number };
+}
+
 /** One of the three scorings in the silence probe (SRS DF-10).
  *  `applicable: false` means there was too little audio of that kind to
  *  score meaningfully — DF-12 requires saying so rather than guessing. */
 export interface ProbeVariant {
   applicable: boolean;
+  /** false when scored on less audio than the reliability floor (0.5 s). */
+  reliable?: boolean;
   seconds: number;
   spoof_probability: number | null;
   decision: "spoof" | "bonafide" | null;
@@ -127,6 +184,8 @@ export interface SilenceProbeResult {
    *  the result. Relative to the clip's own peak, not an absolute floor. */
   silence_top_db: number;
   min_non_speech_seconds: number;
+  min_speech_seconds?: number;
+  min_scorable_seconds?: number;
 
   duration: number;
   speech_seconds: number;
