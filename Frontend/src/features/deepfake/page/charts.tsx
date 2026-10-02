@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, useSpring, useTransform } from "motion/react";
 import type { AttackSummary, DetPoint, ScoreBin } from "../types";
+import { attackLongLabel, attackShortLabel } from "./attacks";
 import { usePalette } from "./theme";
 
 /** A number that counts to its value. */
@@ -455,15 +456,37 @@ export const DetChart = ({
 };
 
 /** Mean score per fake-voice generator, as bars sliding in. */
-export const AttackBars = ({ rows }: { rows: AttackSummary[] }) => {
+/**
+ * `describeGenerators` must only be set for the built-in ASVspoof 2019 LA
+ * subset: other corpora reuse the same ids for different systems (ASVspoof 5's
+ * A07 is not 2019's A07), so labelling them would mislead.
+ */
+export const AttackBars = ({
+  rows,
+  describeGenerators = false,
+}: {
+  rows: AttackSummary[];
+  describeGenerators?: boolean;
+}) => {
   const { REAL, scoreColor } = usePalette();
   return (
     <div className="space-y-2">
       {rows.map((row, index) => {
         const colour = scoreColor(row.mean_score);
+        const genuine = row.attack === "bonafide";
+        // The protocol id alone ("A10") means nothing to most readers, so the
+        // generator it stands for is printed beneath it.
+        const generator = genuine ? "real recordings" : describeGenerators ? attackShortLabel(row.attack) : null;
         return (
-          <div key={row.attack} className="grid grid-cols-[88px_1fr_52px] items-center gap-3 text-xs">
-            <span className="truncate font-mono text-slate-200">{row.attack === "bonafide" ? "genuine" : row.attack}</span>
+          <div
+            key={row.attack}
+            className="grid grid-cols-[minmax(0,10rem)_1fr_52px] items-center gap-3 text-xs"
+            title={!genuine && describeGenerators ? attackLongLabel(row.attack) ?? undefined : undefined}
+          >
+            <span className="min-w-0 leading-tight">
+              <span className="block truncate font-mono text-slate-200">{genuine ? "genuine" : row.attack}</span>
+              {generator && <span className="block truncate text-[10px] text-slate-400">{generator}</span>}
+            </span>
             <div className="relative h-3 overflow-hidden rounded-full bg-white/5">
               <motion.div
                 className="h-full rounded-full"

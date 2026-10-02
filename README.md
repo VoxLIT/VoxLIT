@@ -1,219 +1,149 @@
-# VoxLIT — Learning Interpretability Tool for Voice Models
-
 <p align="center">
-  <a href="https://github.com/VoxLIT/VoxLIT">
-    <img src="https://img.shields.io/badge/version-v1.0-blue" alt="Version"/>
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"/>
-  </a>
+  <img src="docs/images/voxlit-banner.png" alt="VoxLIT: Learning Interpretability Tool for Voice Models" width="100%"/>
 </p>
 
-Interpreting how deep learning models make decisions is crucial, especially in high-stakes applications like speech recognition, emotion detection, and speaker identification. While the Learning Interpretability Tool (LIT) enables exploration of text and tabular models, there's a lack of equivalent tools for voice-based models. Voice data poses additional challenges due to its temporal nature and multi-modal representations (e.g., waveform, spectrogram).
+<h1 align="center">VoxLIT</h1>
 
-VoxLIT extends the interpretability paradigm to audio models, providing researchers and developers with tools to analyze and debug speech models with greater transparency. Through interactive visualizations, attention mechanisms, and perturbation analyses, you can gain deeper insights into how your audio models make decisions.
+<p align="center"><strong>Learning Interpretability Tool for Voice Models</strong></p>
 
-VoxLIT is organized as a homepage plus **five task workbenches**, all active. Tasks, their models, and their datasets are configured centrally — see [STRUCTURE.md](STRUCTURE.md) for the repository layout, the task registry, and how to add a new task, model, or dataset.
+<p align="center">
+  <img src="https://img.shields.io/badge/version-v1.0-blue" alt="Version 1.0"/>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT"/></a>
+  <img src="https://img.shields.io/badge/python-3.11-3776AB" alt="Python 3.11"/>
+  <img src="https://img.shields.io/badge/react-18-61DAFB" alt="React 18"/>
+  <img src="https://img.shields.io/badge/backend-FastAPI-009688" alt="FastAPI"/>
+</p>
 
-| Task | Models | Dataset |
-| --- | --- | --- |
-| Speech Transcription | Whisper base, Whisper large-v3 | Common Voice |
-| Emotion Recognition | wav2vec2 | RAVDESS |
-| Speaker Verification | ECAPA-TDNN, ResNet34-LM | VoxCeleb1 demo subset |
-| Speaker Diarization | pyannote 3.1, Reverb v1, Reverb v2 | AMI subset |
-| Audio Deepfake Detection | wav2vec2 XLS-R, AST, XLSR-Mamba, Wav2Vec2-AASIST, XLSR-SLS, Nes2Net-X | ASVspoof 2019 LA subset |
-
-## Features
-
-- **Audio Data Management**: Upload and manage audio datasets with metadata
-- **Waveform Visualization**: Interactive waveform viewer with playback controls
-- **Model Prediction Analysis**: Examine model predictions and confidence scores
-- **Attention Visualization**: Explore attention patterns in transformer-based audio models
-- **Embedding Analysis**: Visualize high-dimensional audio embeddings in 2D/3D space
-- **Saliency Mapping**: Identify important regions in audio input using gradient-based methods
-- **Perturbation Tools**: Apply various audio perturbations to test model robustness
-- **Interactive Dashboard**: Comprehensive interface for exploring model behavior
-- **Faithful Emotion Recognition**: Loads the wav2vec2 emotion model with its trained classifier head via a custom model class (the stock `Wav2Vec2ForSequenceClassification` loader silently re-initializes the head, producing random predictions)
-
-## Tech Stack
-
-- **Frontend**: React 18 + TypeScript + Vite
-- **UI Framework**: Tailwind CSS + shadcn/ui components
-- **State Management**: TanStack Query
-- **Routing**: React Router
-- **Data Visualization**: Recharts, Plotly.js, and Three.js (via react-three-fiber) for 3D embedding views
-- **Animation**: Motion
-- **Audio Processing**: Web Audio API + wavesurfer.js
-- **Backend**: FastAPI + Python 3.11
-- **ML**: PyTorch, Hugging Face Transformers, pyannote.audio, Captum, scikit-learn, UMAP, librosa
-- **Models**: Whisper, wav2vec2 / XLS-R, ECAPA-TDNN, pyannote, Audio Spectrogram Transformer, and XLS-R-based deepfake detectors
-- **Storage**: Redis for caching predictions and results
-- **Testing**: Vitest (frontend) and pytest (backend)
-- **Deployment**: Modal (frontend + backend + Redis in one container, behind nginx)
-
-## Prerequisites
-
-- **Frontend**:
-  - Node.js (v18 or higher)
-  - npm or bun package manager
-
-- **Backend**:
-  - Python 3.11
-  - Docker Desktop (for Redis)
-  - A Hugging Face access token, for the gated pyannote diarization models
-
-## Installation
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/VoxLIT/VoxLIT.git
-cd VoxLIT
-```
-
-### 2. Set up the Frontend
-
-```bash
-cd Frontend
-npm install
-npm run dev
-```
-
-The frontend dev server runs at http://localhost:8080.
-
-### 3. Start Redis in Docker
-
-```bash
-# In a new terminal (Docker Desktop must be running)
-cd Backend
-docker compose up -d
-```
-
-The backend defaults to `redis://localhost:6379/0`, so no `.env` is needed for local development. To override settings (e.g., a remote Redis), create `Backend/.env` with `REDIS_URL=...`. Speaker Diarization uses gated pyannote models: accept their terms on Hugging Face and add `HF_TOKEN=...` to `Backend/.env`.
-
-### 4. Set up the Backend
-
-> **Important:** always start uvicorn **from the `Backend/` directory** — the app resolves `data/` and `uploads/` relative to the working directory.
-
-```bash
-cd Backend
-py -3.11 -m venv .venv          # or: python3.11 -m venv .venv
-.venv\Scripts\activate           # Windows
-# source .venv/bin/activate      # Unix / macOS
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
-
-The API runs at http://localhost:8000.
-
-Model weights are downloaded from Hugging Face and cached under `~/.cache/huggingface`. Whisper and wav2vec2 load on first startup, which takes a few minutes; the other tasks' models download the first time they are used, and `whisper-large-v3` (~3 GB) only if selected in the UI. The deepfake detectors are about 1.3 GB each.
-
-### 5. Access the Application
-
-Open your browser and navigate to [http://localhost:8080](http://localhost:8080)
-
-## Project Structure
-
-```
-VoxLIT/
-├── Frontend/                    # React frontend application
-│   └── src/
-│       ├── components/          # Shared React components
-│       │   ├── analysis/        # Analysis and perturbation tools
-│       │   ├── audio/           # Audio visualization components
-│       │   ├── dataset/         # Dataset management
-│       │   ├── panels/          # Dashboard panels
-│       │   ├── site/            # Homepage and site chrome
-│       │   ├── ui/              # Reusable UI components (shadcn/ui)
-│       │   ├── visualization/   # Data visualization components
-│       │   └── workbench/       # Shared task-workbench layout
-│       ├── features/            # One folder per task workbench
-│       │   ├── transcription/
-│       │   ├── emotion/
-│       │   ├── verification/
-│       │   ├── task-b/          # Speaker diarization
-│       │   └── deepfake/
-│       ├── tasks/               # Frontend task registry
-│       ├── contexts/            # React contexts
-│       ├── hooks/               # Custom React hooks
-│       ├── lib/                 # API client and utilities
-│       └── pages/               # Home, task page, help portal
-│
-├── Backend/                     # FastAPI backend application
-│   ├── app/                     # Application code
-│   │   ├── api/                 # Shared API routes and endpoints
-│   │   ├── core/                # Settings and core functionality
-│   │   ├── services/            # Shared business logic services
-│   │   └── tasks/               # Per-task routers, models and services + task registry
-│   ├── data/                    # Sample datasets (git-ignored; add your own)
-│   ├── scripts/                 # Dataset download and preparation scripts
-│   ├── tests/                   # Backend tests
-│   └── uploads/                 # User-uploaded audio files
-│
-├── deploy/                      # Modal deployment (app, nginx config, model checks)
-├── STRUCTURE.md                 # Repository layout and task registry guide
-├── CHANGELOG.md                 # Release notes
-├── CODE_OF_CONDUCT.md           # Community guidelines
-├── CONTRIBUTING.md              # Contribution guidelines
-├── LICENSE                      # MIT License
-├── README.md                    # Project documentation
-└── SECURITY.md                  # Security policy
-```
-
-## Available Scripts
-
-### Frontend
-
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm run lint` - Run ESLint
-- `npm run preview` - Preview production build
-- `npm test` - Run frontend tests (Vitest)
-
-### Backend
-
-- `pytest` - Run backend tests
-- `uvicorn app.main:app --reload` - Start the API server in development mode
-
-## Usage
-
-1. **Pick a Task**: Choose a workbench from the homepage
-2. **Load Audio**: Use the task's built-in dataset or upload your own audio files
-3. **Select Models**: Choose from the task's available models
-4. **Explore Visualizations**:
-   - Examine waveforms and spectrograms
-   - View model predictions and confidence scores
-   - Explore attention patterns and embedding spaces
-   - Generate saliency maps to highlight important audio regions
-5. **Apply Perturbations**: Test model robustness with various audio perturbations
-6. **Analyze Results**: Use the interactive dashboard to gain insights
-
-## Contributing
-
-We welcome contributions! Please read our [Contributing Guidelines](CONTRIBUTING.md) for more information.
-
-## Security
-
-For security-related issues, please refer to our [Security Policy](SECURITY.md).
-
-## Acknowledgments
-
-- Inspired by Google's [Learning Interpretability Tool (LIT)](https://github.com/PAIR-code/lit)
-- Built with modern React ecosystem and TypeScript
-- Special thanks to the open-source community for the amazing tools and libraries
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+<p align="center">
+  <a href="#overview">Overview</a> &nbsp;·&nbsp;
+  <a href="#task-workbenches">Task Workbenches</a> &nbsp;·&nbsp;
+  <a href="#interpretability-toolkit">Toolkit</a> &nbsp;·&nbsp;
+  <a href="#research-practice">Research Practice</a> &nbsp;·&nbsp;
+  <a href="#deployment">Deployment</a> &nbsp;·&nbsp;
+  <a href="#authors">Authors</a>
+</p>
 
 ---
 
-<p align="center">
-  <sub>Built for audio model interpretability</sub>
-</p>
+## Overview
 
+Interpretability tools such as Google's Learning Interpretability Tool (LIT) have made text and tabular models far easier to inspect, but speech models have no equivalent. Audio adds difficulties of its own: decisions unfold over time, the same signal can be read as a waveform or a spectrogram, and a model can score well by exploiting recording artefacts rather than the voice itself.
 
+VoxLIT brings interactive interpretability to speech. It pairs each model's predictions with the evidence behind them (attention, attribution over time, embedding geometry and controlled perturbations) so that researchers can test *why* a model decides, not only *what* it decides.
 
-<!-- .venv/bin/uvicorn app.main:app --reload --reload-dir app
-.venv/bin/python -m pytest tests/test_diarization_*.py -q -->
+## Task Workbenches
+
+VoxLIT is organised as a homepage and five task workbenches. Each workbench ships with its own models, a reference dataset, and analyses suited to the task.
+
+| Task | Models | Reference data | Analyses |
+| :--- | :--- | :--- | :--- |
+| **Speech Transcription** | Whisper base, Whisper large-v3 | Common Voice | Predictions and confidence, attention, saliency, perturbations |
+| **Emotion Recognition** | wav2vec2 | RAVDESS | Class probabilities, attention, embeddings, saliency, perturbations |
+| **Speaker Verification** | ECAPA-TDNN, ResNet34-LM | VoxCeleb1 demo subset | Similarity scores, calibrated thresholds, EER / FAR / FRR, perturbation sweeps |
+| **Speaker Diarization** | pyannote 3.1, Reverb v1, Reverb v2 | AMI subset | Speaker timelines, cluster saliency and compactness, before/after perturbation |
+| **Audio Deepfake Detection** | wav2vec2 XLS-R, AST, XLSR-Mamba, Wav2Vec2-AASIST, XLSR-SLS, Nes2Net-X | ASVspoof 2019 LA subset | Six-detector comparison, silence ablation, time-aligned attribution, embedding maps, EER and DET analysis per attack |
+
+## Interpretability Toolkit
+
+- **Prediction analysis.** Scores, confidence and decisions at an adjustable threshold.
+- **Attention visualisation.** Attention patterns in transformer-based audio models.
+- **Attribution over time.** Gradient-based saliency aligned with the waveform, with the attribution method named in the interface.
+- **Embedding analysis.** The representation a model's classifier reads, projected to 2D or 3D.
+- **Perturbation and ablation.** Controlled edits (noise, filtering, silence removal and more) to test which parts of the signal a decision depends on.
+- **Evaluation.** Error rates with confidence intervals, DET curves and per-condition breakdowns.
+
+## Research Practice
+
+VoxLIT is designed to support honest model analysis:
+
+- **Faithful model loading.** Released checkpoints are loaded strictly, so a missing layer fails loudly instead of silently producing random scores. Model revisions are pinned to exact commits.
+- **Ground truth stays hidden per clip.** Per-clip views show only the model's own verdict; labels are used offline, for aggregate evaluation only.
+- **Stated methods and limits.** Every attribution names its method, its duration cap and its known biases.
+- **Shortcut detection.** Ablations such as the silence probe expose detectors that rely on dataset artefacts rather than on speech.
+
+## Architecture
+
+| Layer | Technologies |
+| :--- | :--- |
+| Frontend | React 18, TypeScript, Vite, React Router, TanStack Query |
+| Interface | Tailwind CSS, shadcn/ui, Motion |
+| Visualisation | Recharts, Plotly.js, Three.js (react-three-fiber), wavesurfer.js |
+| Backend | FastAPI, Python 3.11 |
+| Machine learning | PyTorch, Hugging Face Transformers, pyannote.audio, Captum, scikit-learn, UMAP, librosa |
+| Caching | Redis |
+| Hosting | Modal (frontend, API and Redis in a single container behind nginx) |
+| Testing | Vitest, pytest |
+
+## Repository Layout
+
+| Path | Contents |
+| :--- | :--- |
+| `Frontend/src/features/` | One folder per task workbench |
+| `Frontend/src/components/` | Shared interface, audio and visualisation components |
+| `Frontend/src/tasks/` | Frontend task registry |
+| `Frontend/src/pages/` | Homepage, task page and help portal |
+| `Backend/app/tasks/` | Per-task routers, models and services, plus the task registry |
+| `Backend/app/api/`, `Backend/app/services/` | Shared API routes and services |
+| `Backend/scripts/` | Dataset download and preparation scripts |
+| `Backend/tests/` | Backend test suite |
+| `deploy/` | Modal deployment, nginx configuration and model checks |
+
+See [STRUCTURE.md](STRUCTURE.md) for the task registry and for adding a new task, model or dataset.
+
+## Deployment
+
+VoxLIT is hosted on [Modal](https://modal.com). Model weights are stored on a persistent volume, so they download once and survive restarts. The Hugging Face token for gated models is provided as a Modal secret.
+
+```bash
+modal run deploy/modal_app.py::warm
+```
+
+```bash
+modal deploy deploy/modal_app.py
+```
+
+The first command downloads and tests every model; the second publishes the site.
+
+## Development
+
+For contributors working on the codebase:
+
+```bash
+cd Frontend && npm install && npm run dev
+```
+
+```bash
+cd Backend && docker compose up -d && pip install -r requirements.txt && uvicorn app.main:app --reload
+```
+
+| Command | Purpose |
+| :--- | :--- |
+| `npm test` | Frontend tests (Vitest) |
+| `npm run build` | Production build of the frontend |
+| `npm run lint` | ESLint |
+| `pytest` | Backend tests, run from `Backend/` |
+
+## Contributing
+
+Contributions are welcome. Please read the [Contributing Guidelines](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) before opening a pull request.
+
+## Security
+
+To report a vulnerability, please follow the [Security Policy](SECURITY.md).
+
+## Authors
+
+| Role | Name |
+| :--- | :--- |
+| Members | Gunaweera N. <br> Gurusinghe C.R. <br> Hatheem M.R. |
+| Mentor | Prof. Uthayasanker Thayasivam |
+| Teaching Assistant | Mr. Vimosh Vasanthakumar |
+
+## Acknowledgments
+
+- Inspired by Google's [Learning Interpretability Tool (LIT)](https://github.com/PAIR-code/lit).
+- Built on open models and datasets from the speech research community, including Whisper, wav2vec2, pyannote, VoxCeleb, AMI, RAVDESS, Common Voice and ASVspoof.
+
+## License
+
+Released under the MIT License. See [LICENSE](LICENSE) for details.

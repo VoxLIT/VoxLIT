@@ -268,8 +268,15 @@ export function readProbeVerdict(result: SilenceProbeResult) {
       alarming: true,
       title: "Trimming the silence flipped the decision",
       detail:
-        "Removing the leading and trailing silence changed the verdict. The decision was " +
-        "resting on the silence rather than on the speech.",
+        original.decision === "bonafide"
+          ? "Removing the leading and trailing silence turned a genuine verdict into a spoof " +
+            "one, although the speech is unchanged. In corpora such as ASVspoof 2019, genuine " +
+            "recordings carry much longer silences than synthetic ones, so a detector trained on " +
+            "such data can learn \"long silence means real\". Here the genuine verdict was resting on the silence " +
+            "rather than on the speech."
+          : "Removing the leading and trailing silence turned a spoof verdict into a genuine " +
+            "one, although the speech is unchanged. The spoof verdict was resting on the " +
+            "silence rather than on the speech.",
     };
   }
   if (trimmingMovedTheScore) {
