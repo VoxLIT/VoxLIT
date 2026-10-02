@@ -219,7 +219,9 @@ export const DetectorReport = ({
   const hardest = result.per_attack
     .filter((row) => row.is_spoof)
     .reduce<typeof result.per_attack[number] | null>((low, row) => (!low || row.mean_score < low.mean_score ? row : low), null);
-  const hardestInfo = hardest ? describeAttack(hardest.attack) : null;
+  // Attack ids only mean A07-A19 of ASVspoof 2019 LA on the built-in subset.
+  const describeGenerators = customDataset === null;
+  const hardestInfo = hardest && describeGenerators ? describeAttack(hardest.attack) : null;
 
   const zeroEer = result.eer_percent === 0;
   const eerHint = zeroEer
@@ -353,7 +355,7 @@ export const DetectorReport = ({
               </>
             )}
           </p>
-          <AttackBars rows={result.per_attack} />
+          <AttackBars rows={result.per_attack} describeGenerators={describeGenerators} />
         </div>
       </div>
 
@@ -416,7 +418,9 @@ export const DetectorReport = ({
           the bootstrap degenerates, so the exact one-sided binomial bound (1 − 0.05<sup>1/n</sup>, ≈ 3/n) is reported
           instead. Rates at your cut use Wilson 95% intervals. &ldquo;Acceptance&rdquo;
           means accepted as genuine (the ASVspoof convention). Rates at your
-          cut are exact: decisions only change at a clip&rsquo;s score, so they equal those at the next evaluated threshold. Generator ids are the ASVspoof 2019 LA attack systems (Wang et al., 2020): TTS is text-to-speech, VC is voice conversion, and TTS + VC converts TTS output; the label under each id names its waveform generator. A16 and A19 reuse training-set systems, the other eleven are unseen in training.
+          cut are exact: decisions only change at a clip&rsquo;s score, so they equal those at the next evaluated threshold. {describeGenerators
+            ? "Generator ids are the ASVspoof 2019 LA attack systems (Wang et al., 2020): TTS is text-to-speech, VC is voice conversion, and TTS + VC converts TTS output; the label under each id names its waveform generator. A16 and A19 reuse training-set systems, the other eleven are unseen in training."
+            : "Generator ids come from this dataset's own label file and are shown as given."}
         </p>
       </Disclosure>
     </motion.div>
