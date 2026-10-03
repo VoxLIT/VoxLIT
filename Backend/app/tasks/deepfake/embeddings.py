@@ -31,7 +31,9 @@ from .service import file_sha256, get_model_spec, run_embedding
 # Part of the cache key: bump when what the vector *is* changes (e.g. reading
 # a different layer), so stale vectors of another meaning are never reused.
 EMBEDDING_VERSION = "head-input-v1"
-EMBEDDING_TTL_SECONDS = 7 * 24 * 60 * 60
+# Keyed by file hash + EMBEDDING_VERSION, so a long TTL never serves a stale
+# vector; 90 days keeps the hosted voice maps instant between demos.
+EMBEDDING_TTL_SECONDS = 90 * 24 * 60 * 60
 
 # One scoring pass per model at a time. A second request that arrives while the
 # first is still filling the cache (the user flips PCA -> UMAP during the slow

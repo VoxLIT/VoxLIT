@@ -44,7 +44,7 @@ CONDITIONS = {
 
 # Demo files are static, so scores stay valid for as long as the model and
 # threshold version do.
-SCORE_TTL_SECONDS = 7 * 24 * 60 * 60
+SCORE_TTL_SECONDS = 90 * 24 * 60 * 60
 HISTOGRAM_BINS = 20
 
 

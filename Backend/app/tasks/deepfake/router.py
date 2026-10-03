@@ -62,7 +62,7 @@ from .service import (
 
 router = APIRouter()
 
-CACHE_TTL_SECONDS = 7 * 24 * 60 * 60  # demo files are static; keep for a week
+CACHE_TTL_SECONDS = 90 * 24 * 60 * 60  # demo files are static; key carries model + threshold version
 
 
 def _resolve_clip(recording_id: str, request: Request) -> Path:

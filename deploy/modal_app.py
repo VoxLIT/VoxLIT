@@ -2,7 +2,7 @@
 
     nginx :8080  ->  /        Frontend/dist (built with VITE_API_BASE_URL=/api)
                  ->  /api/*   uvicorn :8000 (Backend/app)
-    redis :6379  (in-container; sessions reset when the container stops)
+    redis :6379  (in-container, snapshotted to the cache volume every minute)
 
 Model weights live on the "voxlit-cache" Volume, so they download once and
 survive restarts. The Hugging Face token comes from the "voxlit-hf" Secret.
@@ -11,6 +11,7 @@ survive restarts. The Hugging Face token comes from the "voxlit-hf" Secret.
     modal deploy deploy/modal_app.py         # publish the site
 """
 import subprocess
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -93,6 +94,16 @@ app = modal.App("voxlit", image=image)
 SHARED = dict(volumes={"/cache": cache}, secrets=[hf_secret])
 
 
+def _commit_cache_forever():
+    """Persist the Redis snapshot and new uploads to the volume once a minute."""
+    while True:
+        time.sleep(60)
+        try:
+            cache.commit()
+        except Exception as error:  # noqa: BLE001 -- a failed commit retries next minute
+            print(f"cache commit failed: {error}", flush=True)
+
+
 @app.function(cpu=2.0, memory=8192, timeout=60 * 60, **SHARED)
 def warm(with_large: bool = False):
     """Download every model into the cache volume and run one clip through each."""
@@ -117,11 +128,20 @@ def warm(with_large: bool = False):
 @modal.concurrent(max_inputs=32)
 @modal.web_server(port=8080, startup_timeout=10 * 60)
 def web():
-    Path("/app/Backend/uploads").mkdir(exist_ok=True)
+    # Redis and every task's uploads live on the cache volume, so cached
+    # results (e.g. the deepfake voice map, minutes to compute on CPU) and
+    # visitors' clips survive the container going to sleep. They are kept
+    # together so a clip listed in Redis always still has its file.
+    Path("/cache/redis").mkdir(parents=True, exist_ok=True)
+    Path("/cache/uploads").mkdir(parents=True, exist_ok=True)
+    uploads = Path("/app/Backend/uploads")
+    if not uploads.exists():
+        uploads.symlink_to("/cache/uploads")
     subprocess.Popen(
-        ["redis-server", "--save", "", "--appendonly", "no",
-         "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+        ["redis-server", "--dir", "/cache/redis", "--save", "60 1",
+         "--appendonly", "no", "--maxmemory", "1gb", "--maxmemory-policy", "allkeys-lru"]
     )
+    threading.Thread(target=_commit_cache_forever, daemon=True).start()
     subprocess.Popen(
         ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"],
         cwd="/app/Backend",
