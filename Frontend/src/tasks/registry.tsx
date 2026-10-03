@@ -33,7 +33,6 @@ export const TASKS: TaskDefinition[] = [
     status: "active",
     models: [
       { id: "whisper-base", label: "Whisper Base", available: true },
-      { id: "whisper-large", label: "Whisper Large", available: true },
       // Slot for a future model — flip to available:true once wired in the backend
       { id: "transcription-model-3", label: "Model (to be added)", available: false },
     ],
