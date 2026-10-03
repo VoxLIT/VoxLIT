@@ -58,7 +58,7 @@ def generate_whisper_saliency(audio_file_path: str, model_size: str = "base", me
         if len(audio) > max_len:
             audio = audio[:max_len]
             # Keep only chunks inside the window
-            chunks = [c for c in chunks if c.get("timestamp", [0, 0])[0] < max_seconds]
+            chunks = [c for c in chunks if ((c.get("timestamp") or (0, 0))[0] or 0) < max_seconds]
     
     if model_size == "base":
         processor, model = get_whisper_base_models()
@@ -223,10 +223,16 @@ def generate_whisper_saliency(audio_file_path: str, model_size: str = "base", me
                 logger.info(f"Sample of chunks: {chunks[:3]} ... {chunks[-2:]}")
         
         for chunk in chunks:
-            start_time = chunk.get("timestamp", [0, 0])[0]
-            end_time = chunk.get("timestamp", [0, 0])[1]
+            start_time, end_time = chunk.get("timestamp") or (0, 0)
             word = chunk.get("text", "")
-            
+
+            # Whisper leaves the last word's end open (None) when it runs to
+            # the end of the clip; a missing start can't be placed at all.
+            if start_time is None:
+                continue
+            if end_time is None:
+                end_time = total_duration
+
             # Skip invalid chunks
             if end_time <= start_time or start_time < 0 or end_time > total_duration:
                 continue

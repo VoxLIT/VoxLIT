@@ -8,6 +8,10 @@ from app.services.saliency_service import generate_saliency
 from app.services.dataset_service import resolve_file
 from app.core.redis import get_result, cache_result
 
+# Results are keyed by model + the resolved audio file, so they never go
+# stale; keep them 90 days so the hosted demo stays instant.
+RESULT_TTL_SECONDS = 90 * 24 * 60 * 60
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -85,7 +89,7 @@ async def generate_saliency_endpoint(http_request: Request, request: SaliencyReq
             existing_prediction
         )
         
-        await cache_result("saliency", cache_key, result, ttl=6*60*60)
+        await cache_result("saliency", cache_key, result, ttl=RESULT_TTL_SECONDS)
         logger.info(f"Cached saliency for {resolved_path}")
         
         return SaliencyResponse(**result)

@@ -1183,9 +1183,17 @@ def process_attention_into_pairs(attention_result, audio_file_path, model_size, 
         
         head_attention = layer_attention[head_idx]
         
-        # Calculate duration
-        audio_duration = chunks[-1]["timestamp"][1] if chunks else 0
-        
+        # Calculate duration. Whisper leaves the last word's end open (None)
+        # when it runs to the end of the clip, so prefer the audio's real
+        # length and fall back to the latest timestamp that is set.
+        audio = attention_result.get("audio")
+        sample_rate = attention_result.get("sample_rate") or 16000
+        if audio is not None and hasattr(audio, "__len__") and len(audio) > 0:
+            audio_duration = float(len(audio)) / float(sample_rate)
+        else:
+            known = [t for c in chunks for t in (c.get("timestamp") or ()) if t is not None]
+            audio_duration = float(max(known)) if known else 0.0
+
         # Generate word-to-word attention pairs
         attention_pairs = []
         for i, word1 in enumerate(chunks):

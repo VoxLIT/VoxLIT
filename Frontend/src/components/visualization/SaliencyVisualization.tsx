@@ -232,7 +232,9 @@ export const SaliencyVisualization = ({ selectedFile, model, dataset, originalDa
       const requestBody: any = {
         model: backendModel,
         method: selectedMethod,
-        no_cache: true, // Always regenerate to ensure fresh results per file
+        // Use the server cache: its key already covers model, method and the
+        // file (path, size, mtime), so a hit is always this exact file's result.
+        no_cache: false,
         _file_id: fileIdentifier, // Add for debugging
       };
 

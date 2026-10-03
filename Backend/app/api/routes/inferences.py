@@ -27,6 +27,10 @@ from app.services.model_loader_service import (
 from app.services.dataset_service import resolve_file
 from app.core.redis import get_result, cache_result
 
+# Results are keyed by model + the resolved audio file, so they never go
+# stale; keep them 90 days so the hosted demo stays instant.
+RESULT_TTL_SECONDS = 90 * 24 * 60 * 60
+
 router = APIRouter()
 
 # Define paths
@@ -185,7 +189,7 @@ async def run_inference(
         prediction = await asyncio.to_thread(func, str(resolved_path))
 
     # Cache the result for future use (6 hours TTL)
-    await cache_result(model, cache_key, {"prediction": prediction}, ttl=6*60*60)
+    await cache_result(model, cache_key, {"prediction": prediction}, ttl=RESULT_TTL_SECONDS)
     logger.info(f"Cached prediction for {resolved_path}")
 
     return prediction
@@ -604,7 +608,7 @@ async def batch_wav2vec2_prediction(request: Request):
                 else:
                     # Run model and cache result
                     result = await asyncio.to_thread(predict_emotion_wave2vec, str(file_path))
-                    await cache_result("wav2vec2", cache_key, {"prediction": result}, ttl=6*60*60)
+                    await cache_result("wav2vec2", cache_key, {"prediction": result}, ttl=RESULT_TTL_SECONDS)
                     cache_stats["misses"] += 1
                     logger.debug(f"Generated and cached wav2vec2 result for {filename}")
                 
@@ -761,7 +765,7 @@ async def get_wav2vec2_detailed_prediction(
             cache_data["attention"] = None
             logger.info(f"Excluded attention data from cache to prevent memory issues")
         
-        await cache_result("wav2vec2", cache_key, {"prediction": cache_data}, ttl=6*60*60)
+        await cache_result("wav2vec2", cache_key, {"prediction": cache_data}, ttl=RESULT_TTL_SECONDS)
         logger.info(f"Cached detailed wav2vec2 prediction for {resolved_path} (without attention data)")
         
         # Debug: Log if attention data is present
@@ -844,7 +848,7 @@ async def extract_embeddings_endpoint(
                     raise HTTPException(status_code=400, detail=f"Embedding extraction not supported for model: {model}")
                 
                 # Cache the embeddings (24 hours TTL since embeddings don't change)
-                await cache_result(model, cache_key, {"embedding": embedding.tolist()}, ttl=24*60*60)
+                await cache_result(model, cache_key, {"embedding": embedding.tolist()}, ttl=RESULT_TTL_SECONDS)
                 logger.info(f"Cached embeddings for {filename}")
             
             # Convert back to numpy array if it was cached as list
@@ -971,7 +975,7 @@ async def extract_single_embedding_endpoint(
             raise HTTPException(status_code=400, detail=f"Embedding extraction not supported for model: {model}")
         
         # Cache the embeddings (24 hours TTL)
-        await cache_result(model, cache_key, {"embedding": embedding.tolist()}, ttl=24*60*60)
+        await cache_result(model, cache_key, {"embedding": embedding.tolist()}, ttl=RESULT_TTL_SECONDS)
         logger.info(f"Cached embeddings for {resolved_path}")
     
     # Convert back to numpy array if it was cached as list
@@ -1039,7 +1043,7 @@ async def batch_audio_frequency_analysis(request: Request):
                 else:
                     # Extract features and cache result
                     features = await asyncio.to_thread(extract_audio_frequency_features, str(file_path))
-                    await cache_result("audio_frequency", cache_key, {"features": features}, ttl=24*60*60)  # 24h cache
+                    await cache_result("audio_frequency", cache_key, {"features": features}, ttl=RESULT_TTL_SECONDS)
                     cache_stats["misses"] += 1
                     logger.debug(f"Generated and cached audio frequency features for {filename}")
                 
@@ -1209,7 +1213,7 @@ async def get_whisper_with_attention(
         result = await asyncio.to_thread(transcribe_whisper_with_attention, str(resolved_path), model_size)
         
         # Cache the result
-        await cache_result(model, cache_key, {"prediction": result}, ttl=6*60*60)
+        await cache_result(model, cache_key, {"prediction": result}, ttl=RESULT_TTL_SECONDS)
         logger.info(f"Cached {model} attention prediction for {resolved_path}")
         
         # Debug: Log if attention data is present
@@ -1365,7 +1369,7 @@ async def extract_attention_pairs_endpoint(
             )
         
         # Cache result following your pattern
-        await cache_result(model, cache_key, attention_pairs_data, ttl=24*60*60)
+        await cache_result(model, cache_key, attention_pairs_data, ttl=RESULT_TTL_SECONDS)
         
         logger.info(f"Generated attention pairs: {len(attention_pairs_data.get('attention_pairs', []))} pairs")
         

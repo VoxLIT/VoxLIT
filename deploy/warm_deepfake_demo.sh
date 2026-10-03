@@ -11,7 +11,8 @@
 # Results are cached for 90 days (deepfake cache TTL) in Redis on the cache
 # volume.
 #
-#   bash deploy/warm_deepfake_demo.sh
+#   bash deploy/warm_deepfake_demo.sh                # report + demo clips
+#   SKIP_REPORT=1 bash deploy/warm_deepfake_demo.sh  # demo clips only
 set -uo pipefail
 
 SITE="${SITE:-https://chanugx--voxlit-web.modal.run}"
@@ -44,8 +45,14 @@ curl -s -c "$JAR" "$SITE/api/health" >/dev/null
 models=$(curl -s "$API/models" | python3 -c 'import json,sys; print(" ".join(m["key"] for m in json.load(sys.stdin)["models"]))')
 listing=$(curl -s "$API/dataset/recordings?dataset=$BUILTIN")
 
-echo "== Detector report: every clip, every model ($BUILTIN)"
-for model in $models; do
+if [[ -n "${SKIP_REPORT:-}" ]]; then
+  echo "== Detector report: skipped (SKIP_REPORT set)"
+  models_for_report=""
+else
+  echo "== Detector report: every clip, every model ($BUILTIN)"
+  models_for_report="$models"
+fi
+for model in $models_for_report; do
   for condition in as_distributed silence_trimmed; do
     body="{\"model\":\"$model\",\"condition\":\"$condition\",\"builtin\":\"$BUILTIN\"}"
     result=$(post scores "$body")
