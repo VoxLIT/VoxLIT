@@ -18,11 +18,15 @@ from app.core.redis import cache_result, get_result
 from app.tasks.verification.audio_streaming import stream_audio_file
 
 from .dataset import (
-    DATASET_ID,
+    DEFAULT_DATASET_ID,
     DatasetUnavailable,
     RecordingNotFound,
+    UnknownDataset,
+    audio_media_type,
+    get_builtin_dataset,
     get_dataset_info,
     get_recording,
+    list_builtin_datasets,
     list_recordings,
     resolve_recording_path,
 )
@@ -83,22 +87,37 @@ async def available_models():
     return {"models": list_models()}
 
 
+def _builtin_id(dataset: str | None) -> str:
+    try:
+        return get_builtin_dataset(dataset).dataset_id
+    except UnknownDataset as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
 @router.get("/dataset")
-async def dataset_info():
-    return get_dataset_info()
+async def dataset_info(dataset: str = DEFAULT_DATASET_ID):
+    return await run_in_threadpool(get_dataset_info, _builtin_id(dataset))
+
+
+@router.get("/builtin-datasets")
+async def builtin_datasets():
+    """The built-in labelled subsets for the Dataset menu: names, sources and
+    clip counts, never labels."""
+    return {"datasets": await run_in_threadpool(list_builtin_datasets), "default": DEFAULT_DATASET_ID}
 
 
 @router.get("/dataset/recordings")
-async def dataset_recordings():
+async def dataset_recordings(dataset: str = DEFAULT_DATASET_ID):
     """Opaque recording ids only -- never the bona fide/spoof key. See
     dataset.py's module docstring."""
+    dataset_id = _builtin_id(dataset)
     try:
-        recordings = list_recordings()
+        recordings = await run_in_threadpool(list_recordings, dataset_id)
     except DatasetUnavailable as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
     return {
-        "dataset_id": DATASET_ID,
+        "dataset_id": dataset_id,
         "total_recordings": len(recordings),
         "recordings": [asdict(recording) for recording in recordings],
     }
@@ -130,7 +149,7 @@ async def dataset_recording_audio(recording_id: str, request: Request):
         path = resolve_recording_path(recording_id)
     except (DatasetUnavailable, RecordingNotFound) as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    return stream_audio_file(path, request, path.name, "audio/flac")
+    return stream_audio_file(path, request, path.name, audio_media_type(path))
 
 
 # ---------------------------------------------------------------------------
@@ -214,8 +233,10 @@ class EvaluationRequest(BaseModel):
     model: str
     # "as_distributed" or "silence_trimmed" (see evaluation.CONDITIONS).
     condition: str = "as_distributed"
-    # None = the built-in ASVspoof subset; otherwise a custom dataset's name.
+    # None = a built-in subset (see `builtin`); otherwise a custom dataset's name.
     dataset: str | None = None
+    # Which built-in subset when `dataset` is None; None = ASVspoof 2019 LA.
+    builtin: str | None = None
 
 
 @router.post("/scores")
@@ -237,6 +258,7 @@ async def evaluation(request: EvaluationRequest, http_request: Request):
         raise HTTPException(status_code=400, detail=f"condition must be one of: {', '.join(CONDITIONS)}.")
 
     source = None
+    builtin_id = _builtin_id(request.builtin)
     if request.dataset:
         sid = getattr(http_request.state, "sid", None)
         try:
@@ -251,7 +273,9 @@ async def evaluation(request: EvaluationRequest, http_request: Request):
         source = (clips, labels, f"custom:{request.dataset}")
 
     try:
-        return await evaluate_dataset(request.model, condition=request.condition, source=source)
+        return await evaluate_dataset(
+            request.model, condition=request.condition, source=source, builtin_dataset=builtin_id
+        )
     except DatasetUnavailable as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except NotEnoughLabelledData as error:
@@ -266,8 +290,10 @@ class EmbeddingProjectionRequest(BaseModel):
     n_components: int = 2
     # The visitor's own `up_...` clips, placed on the same map as the dataset.
     extra_recording_ids: list[str] = []
-    # None = the built-in ASVspoof subset; otherwise a custom dataset's name.
+    # None = a built-in subset (see `builtin`); otherwise a custom dataset's name.
     dataset: str | None = None
+    # Which built-in subset when `dataset` is None; None = ASVspoof 2019 LA.
+    builtin: str | None = None
 
 
 @router.post("/embeddings")
@@ -292,6 +318,7 @@ async def embedding_projection(request: EmbeddingProjectionRequest, http_request
     if request.n_components not in SUPPORTED_PROJECTION_COMPONENTS:
         raise HTTPException(status_code=422, detail="n_components must be 2 or 3.")
 
+    builtin_id = _builtin_id(request.builtin)
     sid = getattr(http_request.state, "sid", None)
     extra_clips = []
     for clip_id in dict.fromkeys(request.extra_recording_ids):
@@ -320,7 +347,7 @@ async def embedding_projection(request: EmbeddingProjectionRequest, http_request
             request.reduction_method,
             request.n_components,
             extra_clips,
-            **({"base_clips": base_clips} if base_clips is not None else {}),
+            **({"base_clips": base_clips} if base_clips is not None else {"dataset_id": builtin_id}),
         )
     except DatasetUnavailable as error:
         raise HTTPException(status_code=404, detail=str(error)) from error

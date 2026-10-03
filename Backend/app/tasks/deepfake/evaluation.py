@@ -19,7 +19,7 @@ from app.core.redis import cache_result, get_result
 
 from . import metrics
 from .dataset import (
-    DATASET_ID,
+    get_builtin_dataset,
     list_recordings,
     load_ground_truth,
     resolve_recording_path,
@@ -98,13 +98,16 @@ def _attack_summary(rows: list[dict]) -> list[dict]:
     return summary
 
 
-def builtin_clips() -> tuple[list[tuple[str, object]], dict[str, tuple[str, str]], str]:
-    """The ASVspoof subset as (stem, path) pairs, its protocol, and its id."""
+def builtin_clips(
+    dataset_id: str | None = None,
+) -> tuple[list[tuple[str, object]], dict[str, tuple[str, str]], str]:
+    """A built-in subset as (stem, path) pairs, its protocol, and its id."""
+    dataset_id = get_builtin_dataset(dataset_id).dataset_id
     clips = [
         (recording.display_filename.rsplit(".", 1)[0], resolve_recording_path(recording.recording_id))
-        for recording in list_recordings()
+        for recording in list_recordings(dataset_id)
     ]
-    return clips, load_ground_truth(), DATASET_ID
+    return clips, load_ground_truth(dataset_id), dataset_id
 
 
 async def evaluate_dataset(
@@ -112,16 +115,18 @@ async def evaluate_dataset(
     bins: int = HISTOGRAM_BINS,
     condition: str = "as_distributed",
     source: tuple[list[tuple[str, object]], dict[str, tuple[str, str]], str] | None = None,
+    builtin_dataset: str | None = None,
 ) -> dict:
     """Score every labelled recording and assemble Feature 1's payload.
 
-    `source` defaults to the built-in subset; a custom dataset passes its own
-    clips and label map (see custom_datasets.labelled_clips).
+    `source` defaults to the built-in subset named by `builtin_dataset`
+    (ASVspoof 2019 LA when None); a custom dataset passes its own clips and
+    label map (see custom_datasets.labelled_clips).
     """
     if condition not in CONDITIONS:
         raise ValueError(f"condition must be one of: {', '.join(CONDITIONS)}.")
     spec = get_model_spec(model_key)
-    clips, truth, dataset_id = source if source is not None else builtin_clips()
+    clips, truth, dataset_id = source if source is not None else builtin_clips(builtin_dataset)
 
     rows: list[dict] = []
     for stem, path in clips:

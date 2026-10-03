@@ -231,7 +231,7 @@ async def test_embeddings_place_user_clips_on_the_dataset_map(client, monkeypatc
     clip_id = (await _upload(client, name="mine.wav")).json()["recording_id"]
     captured = {}
 
-    async def _fake_project(model, method, components, extra_clips):
+    async def _fake_project(model, method, components, extra_clips, **_dataset):
         captured["extra"] = extra_clips
         return {"recordings": [], "coordinates": []}
 

@@ -1,7 +1,11 @@
-"""Read-only discovery and listing for the ASVspoof 2019 LA demo subset.
+"""Read-only discovery and listing for the deepfake task's built-in datasets.
 
-Exposes the on-disk `asvspoof2019-la` recordings behind opaque, stable
-recording ids (same pattern as the verification and diarization tasks).
+Three labelled 200-clip subsets, each behind opaque, stable recording ids
+(same pattern as the verification and diarization tasks):
+
+    asvspoof2019-la   ASVspoof 2019 LA eval (in-domain for most detectors)
+    asvspoof5         ASVspoof 5 eval (newer attacks, codecs, crowdsourced speech)
+    in-the-wild       In-the-Wild (Müller et al. 2022; real-world generalisation)
 
 GROUND-TRUTH SAFETY: an ASVspoof file id (`LA_E_2834763`) encodes nothing, so
 it is safe to display -- but the protocol's `key` (bonafide/spoof) and
@@ -9,11 +13,16 @@ it is safe to display -- but the protocol's `key` (bonafide/spoof) and
 judge. They are parsed only by `load_ground_truth()`, which is reserved for
 offline evaluation, and must never reach a runtime response.
 
-Expected on-disk layout (built by scripts/prepare_asvspoof_la_subset.py):
+Expected on-disk layout, one directory per dataset under DEEPFAKE_DATASET_ROOT
+(built by scripts/prepare_asvspoof_la_subset.py and
+scripts/prepare_deepfake_eval_subsets.py):
 
-    Backend/data/deepfake/asvspoof2019_la/
-        flac/LA_E_*.flac
+    Backend/data/deepfake/<directory>/
+        <audio_subdir>/*.flac|*.wav
         protocol.txt
+
+Every protocol.txt is written in the ASVspoof 2019 CM format, whatever the
+source corpus used, so `load_ground_truth` reads all three the same way.
 """
 
 from __future__ import annotations
@@ -24,14 +33,73 @@ from pathlib import Path
 
 from app.core.settings import settings
 
-DATASET_ID = "asvspoof2019-la"
 EXPECTED_RECORDING_COUNT = 200
-SUPPORTED_AUDIO_EXTENSIONS = {".flac"}
+SUPPORTED_AUDIO_EXTENSIONS = {".flac", ".wav"}
 PROTOCOL_FILENAME = "protocol.txt"
+AUDIO_MEDIA_TYPES = {".flac": "audio/flac", ".wav": "audio/wav"}
+
+
+@dataclass(frozen=True, slots=True)
+class BuiltinDataset:
+    dataset_id: str
+    label: str
+    directory: str
+    audio_subdir: str
+    audio_extension: str
+    description: str
+    citation: str
+    license: str
+
+
+BUILTIN_DATASETS: dict[str, BuiltinDataset] = {
+    dataset.dataset_id: dataset
+    for dataset in (
+        BuiltinDataset(
+            dataset_id="asvspoof2019-la",
+            label="ASVspoof 2019 LA (subset)",
+            directory="asvspoof2019_la",
+            audio_subdir="flac",
+            audio_extension=".flac",
+            description="Studio-quality VCTK speech against 13 TTS and voice-conversion attacks. "
+            "Most detectors here were trained on its training partition.",
+            citation="Wang et al., Computer Speech & Language 2020",
+            license="ODC-By 1.0",
+        ),
+        BuiltinDataset(
+            dataset_id="asvspoof5",
+            label="ASVspoof 5 (subset)",
+            directory="asvspoof5",
+            audio_subdir="flac",
+            audio_extension=".flac",
+            description="Crowdsourced audiobook speech against 16 newer attacks, some with "
+            "adversarial or codec processing. Unseen by every detector here.",
+            citation="Wang et al., ASVspoof 5, Computer Speech & Language 2025",
+            license="ODC-By 1.0",
+        ),
+        BuiltinDataset(
+            dataset_id="in-the-wild",
+            label="In-the-Wild (subset)",
+            directory="in_the_wild",
+            audio_subdir="wav",
+            audio_extension=".wav",
+            description="Public-figure speech and deepfakes collected from the internet. "
+            "Tests real-world generalisation; unseen by every detector here.",
+            citation="Müller et al., Interspeech 2022",
+            license="see attribution.txt of the release",
+        ),
+    )
+}
+DEFAULT_DATASET_ID = "asvspoof2019-la"
+# Kept for callers that only know the original single dataset.
+DATASET_ID = DEFAULT_DATASET_ID
 
 
 class DatasetUnavailable(RuntimeError):
     """Raised when the demo dataset directory is missing or unreadable."""
+
+
+class UnknownDataset(ValueError):
+    """Raised when a dataset id is not one of BUILTIN_DATASETS."""
 
 
 class RecordingNotFound(ValueError):
@@ -49,22 +117,34 @@ class RecordingInfo:
     duration_seconds: float | None = None
 
 
-def _dataset_root() -> Path:
-    return settings.asvspoof2019_la_dataset_dir
+def get_builtin_dataset(dataset_id: str | None) -> BuiltinDataset:
+    try:
+        return BUILTIN_DATASETS[dataset_id or DEFAULT_DATASET_ID]
+    except KeyError as error:
+        raise UnknownDataset(f"Unknown dataset: {dataset_id}") from error
 
 
-def _audio_dir() -> Path:
-    return _dataset_root() / "flac"
+def _dataset_root(dataset_id: str | None = None) -> Path:
+    return settings.DEEPFAKE_DATASET_ROOT / get_builtin_dataset(dataset_id).directory
 
 
-def _recording_id_for(filename: str) -> str:
-    digest = hashlib.sha256(filename.encode("utf-8")).hexdigest()
+def _audio_dir(dataset_id: str | None = None) -> Path:
+    return _dataset_root(dataset_id) / get_builtin_dataset(dataset_id).audio_subdir
+
+
+def _recording_id_for(filename: str, dataset_id: str | None = None) -> str:
+    # The original dataset hashes the bare filename, so its ids (and every
+    # client-side reference to them) are unchanged. The others are namespaced:
+    # In-the-Wild's "0.wav" must never collide with anything else.
+    dataset_id = dataset_id or DEFAULT_DATASET_ID
+    key = filename if dataset_id == DEFAULT_DATASET_ID else f"{dataset_id}/{filename}"
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
     return f"rec_{digest[:16]}"
 
 
-def _iter_audio_files(audio_dir: Path):
+def _iter_audio_files(audio_dir: Path, dataset_id: str | None = None):
     if not audio_dir.is_dir():
-        raise DatasetUnavailable(f"Deepfake demo dataset not found: {DATASET_ID}")
+        raise DatasetUnavailable(f"Deepfake demo dataset not found: {dataset_id or DEFAULT_DATASET_ID}")
 
     for entry in audio_dir.iterdir():
         # Top level only: protocol.txt sits in the parent directory and is
@@ -88,12 +168,12 @@ def _read_duration(path: Path) -> float | None:
         return None
 
 
-def _discover(audio_dir: Path) -> list[RecordingInfo]:
+def _discover(dataset_id: str | None = None) -> list[RecordingInfo]:
     recordings: list[RecordingInfo] = []
-    for entry in _iter_audio_files(audio_dir):
+    for entry in _iter_audio_files(_audio_dir(dataset_id), dataset_id):
         recordings.append(
             RecordingInfo(
-                recording_id=_recording_id_for(entry.name),
+                recording_id=_recording_id_for(entry.name, dataset_id),
                 display_filename=entry.name,
                 extension=entry.suffix.lower(),
                 size_bytes=entry.stat().st_size,
@@ -104,59 +184,92 @@ def _discover(audio_dir: Path) -> list[RecordingInfo]:
     return recordings
 
 
-def get_dataset_info() -> dict[str, object]:
-    """Summarize the demo dataset without raising when it is absent."""
+def get_dataset_info(dataset_id: str | None = None) -> dict[str, object]:
+    """Summarize one built-in dataset without raising when it is absent."""
 
+    dataset = get_builtin_dataset(dataset_id)
     try:
-        recordings = _discover(_audio_dir())
+        total = sum(1 for _ in _iter_audio_files(_audio_dir(dataset.dataset_id), dataset.dataset_id))
+        available = True
     except DatasetUnavailable:
-        return {
-            "dataset_id": DATASET_ID,
-            "expected_recording_count": EXPECTED_RECORDING_COUNT,
-            "total_recordings": 0,
-            "audio_extensions": sorted(SUPPORTED_AUDIO_EXTENSIONS),
-            "available": False,
-        }
+        total, available = 0, False
 
     return {
-        "dataset_id": DATASET_ID,
+        "dataset_id": dataset.dataset_id,
         "expected_recording_count": EXPECTED_RECORDING_COUNT,
-        "total_recordings": len(recordings),
-        "audio_extensions": sorted(SUPPORTED_AUDIO_EXTENSIONS),
-        "available": True,
+        "total_recordings": total,
+        "audio_extensions": [dataset.audio_extension],
+        "available": available,
     }
 
 
-def list_recordings() -> list[RecordingInfo]:
-    """List every recording in the demo subset. Raises if unavailable.
+def list_builtin_datasets() -> list[dict[str, object]]:
+    """Every built-in dataset, present on disk or not (the menu greys out
+    the missing ones). Counts only -- no labels."""
+
+    return [
+        {
+            **get_dataset_info(dataset.dataset_id),
+            "label": dataset.label,
+            "description": dataset.description,
+            "citation": dataset.citation,
+            "license": dataset.license,
+        }
+        for dataset in BUILTIN_DATASETS.values()
+    ]
+
+
+def list_recordings(dataset_id: str | None = None) -> list[RecordingInfo]:
+    """List every recording in one built-in subset. Raises if unavailable.
 
     Carries no label: see the module docstring.
     """
 
-    return _discover(_audio_dir())
+    return _discover(dataset_id)
 
 
 def get_recording(recording_id: str) -> RecordingInfo:
-    """Look up a single recording by its opaque id."""
+    """Look up a single recording by its opaque id, in any built-in dataset."""
 
-    for recording in list_recordings():
-        if recording.recording_id == recording_id:
-            return recording
+    path, _dataset_id = _locate(recording_id)
+    return RecordingInfo(
+        recording_id=recording_id,
+        display_filename=path.name,
+        extension=path.suffix.lower(),
+        size_bytes=path.stat().st_size,
+        duration_seconds=_read_duration(path),
+    )
+
+
+def _locate(recording_id: str) -> tuple[Path, str]:
+    found_any = False
+    for dataset_id in BUILTIN_DATASETS:
+        try:
+            for entry in _iter_audio_files(_audio_dir(dataset_id), dataset_id):
+                found_any = True
+                if _recording_id_for(entry.name, dataset_id) == recording_id:
+                    return entry, dataset_id
+        except DatasetUnavailable:
+            continue
+    if not found_any:
+        raise DatasetUnavailable("No deepfake demo dataset is installed.")
     raise RecordingNotFound(f"Unknown recording id: {recording_id}")
 
 
 def resolve_recording_path(recording_id: str) -> Path:
-    """Resolve a safe recording id to its on-disk path. Internal use only --
-    unknown or path-traversal ids simply miss and raise `RecordingNotFound`
-    without touching the filesystem with untrusted input."""
+    """Resolve a safe recording id to its on-disk path, whichever built-in
+    dataset holds it. Internal use only -- unknown or path-traversal ids
+    simply miss and raise `RecordingNotFound` without touching the
+    filesystem with untrusted input."""
 
-    for entry in _iter_audio_files(_audio_dir()):
-        if _recording_id_for(entry.name) == recording_id:
-            return entry
-    raise RecordingNotFound(f"Unknown recording id: {recording_id}")
+    return _locate(recording_id)[0]
 
 
-def load_ground_truth() -> dict[str, tuple[str, str]]:
+def audio_media_type(path: Path) -> str:
+    return AUDIO_MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream")
+
+
+def load_ground_truth(dataset_id: str | None = None) -> dict[str, tuple[str, str]]:
     """`{file_id: (system_id, key)}` parsed from protocol.txt.
 
     OFFLINE EVALUATION ONLY (Feature 1's score distribution / DET / EER). The
@@ -167,10 +280,10 @@ def load_ground_truth() -> dict[str, tuple[str, str]]:
         SPEAKER_ID  FILE_ID  -  SYSTEM_ID  KEY
     """
 
-    protocol_path = _dataset_root() / PROTOCOL_FILENAME
+    protocol_path = _dataset_root(dataset_id) / PROTOCOL_FILENAME
     if not protocol_path.is_file():
         raise DatasetUnavailable(
-            f"Ground-truth protocol not found for {DATASET_ID}: {protocol_path}"
+            f"Ground-truth protocol not found for {dataset_id or DEFAULT_DATASET_ID}: {protocol_path}"
         )
 
     truth: dict[str, tuple[str, str]] = {}

@@ -100,7 +100,7 @@ const routeFetch = (initialClips: UserClip[] = []) => {
     saliency: (init) => ({ ...saliency, ...JSON.parse(String(init?.body)) }),
   };
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-    const key = Object.keys(bodies).find((path) => url.endsWith(`/tasks/deepfake/${path}`));
+    const key = Object.keys(bodies).find((path) => url.split("?")[0].endsWith(`/tasks/deepfake/${path}`));
     return {
       ok: key !== undefined,
       status: key ? 200 : 404,

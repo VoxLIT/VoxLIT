@@ -1,5 +1,5 @@
 import { API_BASE } from "@/lib/api";
-import type { CustomDataset, RecordingInfo, UserClip } from "../types";
+import type { BuiltinDataset, CustomDataset, RecordingInfo, UserClip } from "../types";
 
 /** POST to one of the deepfake task's endpoints and unwrap FastAPI's `detail`. */
 export async function postDeepfake<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
@@ -32,6 +32,20 @@ async function unwrap<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.detail || `Request failed (${response.status})`);
   return payload as T;
+}
+
+/** The labelled subsets that ship with the task (ASVspoof 2019 LA, ASVspoof 5, In-the-Wild). */
+export async function listBuiltinDatasets(): Promise<BuiltinDataset[]> {
+  const response = await fetch(`${API_BASE}/tasks/deepfake/builtin-datasets`, { credentials: "include" });
+  return (await unwrap<{ datasets: BuiltinDataset[] }>(response)).datasets ?? [];
+}
+
+export async function listBuiltinRecordings(datasetId: string): Promise<RecordingInfo[]> {
+  const response = await fetch(
+    `${API_BASE}/tasks/deepfake/dataset/recordings?dataset=${encodeURIComponent(datasetId)}`,
+    { credentials: "include" },
+  );
+  return (await unwrap<{ recordings: RecordingInfo[] }>(response)).recordings;
 }
 
 export async function listUserClips(): Promise<UserClip[]> {

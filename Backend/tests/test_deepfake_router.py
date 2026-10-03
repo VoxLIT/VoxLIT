@@ -194,3 +194,29 @@ async def test_run_surfaces_an_unloadable_model_as_503(
     )
 
     assert response.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_builtin_datasets_route_lists_the_three_subsets_without_labels(client, monkeypatch, tmp_path):
+    from app.core.settings import settings
+
+    monkeypatch.setattr(settings, "DEEPFAKE_DATASET_ROOT", tmp_path)
+    itw = tmp_path / "in_the_wild"
+    (itw / "wav").mkdir(parents=True)
+    (itw / "wav" / "7.wav").write_bytes(b"RIFF")
+    (itw / "protocol.txt").write_text("Someone 7 - unattributed spoof\n")
+
+    response = await client.get("/tasks/deepfake/builtin-datasets")
+    assert response.status_code == 200
+    payload = response.json()
+    assert [d["dataset_id"] for d in payload["datasets"]] == ["asvspoof2019-la", "asvspoof5", "in-the-wild"]
+    assert "unattributed" not in response.text
+
+    listing = await client.get("/tasks/deepfake/dataset/recordings", params={"dataset": "in-the-wild"})
+    assert listing.status_code == 200
+    assert listing.json()["dataset_id"] == "in-the-wild"
+    assert [r["display_filename"] for r in listing.json()["recordings"]] == ["7.wav"]
+    assert "unattributed" not in listing.text and "protocol" not in listing.text
+
+    missing = await client.get("/tasks/deepfake/dataset/recordings", params={"dataset": "nope"})
+    assert missing.status_code == 404

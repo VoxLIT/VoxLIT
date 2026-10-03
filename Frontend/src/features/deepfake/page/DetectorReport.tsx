@@ -18,7 +18,7 @@ const CONDITION_OPTIONS: { id: EvaluationCondition; label: string; hint: string 
   {
     id: "as_distributed",
     label: "As distributed",
-    hint: "Clips exactly as ASVspoof ships them. Genuine clips carry far more silence, which detectors can exploit.",
+    hint: "Clips exactly as the dataset ships them. In ASVspoof 2019 LA genuine clips carry far more silence, which detectors can exploit.",
   },
 ];
 
@@ -45,6 +45,8 @@ export const DetectorReport = ({
   modelLabel,
   datasetSize,
   customDataset = null,
+  builtinDataset = "asvspoof2019-la",
+  builtinLabel = "built-in subset",
   labelledCount = null,
 }: {
   model: string;
@@ -52,6 +54,9 @@ export const DetectorReport = ({
   datasetSize: number;
   /** A researcher's own dataset name, or null for the built-in subset. */
   customDataset?: string | null;
+  /** Which built-in subset is scored when `customDataset` is null. */
+  builtinDataset?: string;
+  builtinLabel?: string;
   /** For a custom dataset: how many of its files a label file matched. */
   labelledCount?: number | null;
 }) => {
@@ -64,7 +69,7 @@ export const DetectorReport = ({
     setConditionState(value);
     writeSession("report.condition", value);
   };
-  const datasetPart = customDataset ? `custom-${customDataset}` : "builtin";
+  const datasetPart = customDataset ? `custom-${customDataset}` : `builtin-${builtinDataset}`;
   const keyFor = (which: EvaluationCondition) => resultKey("scores.v2", model, datasetPart, which);
   const key = keyFor(condition);
   const otherCondition: EvaluationCondition = condition === "silence_trimmed" ? "as_distributed" : "silence_trimmed";
@@ -85,7 +90,7 @@ export const DetectorReport = ({
   const body = (which: EvaluationCondition) => ({
     model,
     condition: which,
-    ...(customDataset ? { dataset: customDataset } : {}),
+    ...(customDataset ? { dataset: customDataset } : { builtin: builtinDataset }),
   });
 
   const run = async () => {
@@ -195,7 +200,11 @@ export const DetectorReport = ({
             <ErrorNote>
               {customDataset
                 ? `"${customDataset}" has no label file yet. Add one in Manage Datasets (CSV "filename,label" or ASVspoof protocol lines) to measure EER on it.`
-                : "The labelled ASVspoof subset isn't on this server. Build it with scripts/prepare_asvspoof_la_subset.py."}
+                : `The labelled ${builtinLabel} isn't on this server. Build it with ${
+                    builtinDataset === "asvspoof2019-la"
+                      ? "scripts/prepare_asvspoof_la_subset.py"
+                      : "scripts/prepare_deepfake_eval_subsets.py"
+                  }.`}
             </ErrorNote>
           )}
           <PrimaryButton onClick={run} busy={running} disabled={!datasetAvailable}>
@@ -219,8 +228,9 @@ export const DetectorReport = ({
   const hardest = result.per_attack
     .filter((row) => row.is_spoof)
     .reduce<typeof result.per_attack[number] | null>((low, row) => (!low || row.mean_score < low.mean_score ? row : low), null);
-  // Attack ids only mean A07-A19 of ASVspoof 2019 LA on the built-in subset.
-  const describeGenerators = customDataset === null;
+  // Attack ids only mean A07-A19 of ASVspoof 2019 LA on that subset
+  // (ASVspoof 5 reuses A17-A19 for different systems).
+  const describeGenerators = customDataset === null && builtinDataset === "asvspoof2019-la";
   const hardestInfo = hardest && describeGenerators ? describeAttack(hardest.attack) : null;
 
   const zeroEer = result.eer_percent === 0;
@@ -420,7 +430,11 @@ export const DetectorReport = ({
           means accepted as genuine (the ASVspoof convention). Rates at your
           cut are exact: decisions only change at a clip&rsquo;s score, so they equal those at the next evaluated threshold. {describeGenerators
             ? "Generator ids are the ASVspoof 2019 LA attack systems (Wang et al., 2020): TTS is text-to-speech, VC is voice conversion, and TTS + VC converts TTS output; the label under each id names its waveform generator. A16 and A19 reuse training-set systems, the other eleven are unseen in training."
-            : "Generator ids come from this dataset's own label file and are shown as given."}
+            : customDataset === null && builtinDataset === "asvspoof5"
+              ? "Generator ids are the ASVspoof 5 evaluation attacks A17–A32 (Wang et al., 2025), a different catalogue from ASVspoof 2019 LA's ids of the same name, and none was seen by any detector here in training."
+              : customDataset === null && builtinDataset === "in-the-wild"
+                ? "In-the-Wild does not name the system behind each fake, so every one is grouped as \u201cunattributed\u201d."
+                : "Generator ids come from this dataset's own label file and are shown as given."}
         </p>
       </Disclosure>
     </motion.div>
@@ -499,7 +513,7 @@ const ConditionComparison = ({ current, other }: { current: DeepfakeEvaluation; 
           {tooFew
             ? `With only ${smallestClass} labelled clips in the smaller class, the two conditions cannot be told apart reliably: compare the intervals, not the point values. Add more labelled clips for a conclusive ablation.`
             : gap > 1
-            ? `Removing only the outer silence raises the EER by ${gap.toFixed(2)} points. Part of the as-distributed score comes from silence length, a known ASVspoof 2019 LA artefact (Müller et al., 2021), so the trimmed figure is the one to quote.`
+            ? `Removing only the outer silence raises the EER by ${gap.toFixed(2)} points. Part of the as-distributed score comes from silence length, the shortcut Müller et al. (2021) found in ASVspoof 2019 LA, so the trimmed figure is the one to quote.`
             : "Trimming the silence barely moves the EER: this detector is not leaning on silence length here."}
         </p>
       </div>
