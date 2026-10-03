@@ -20,7 +20,7 @@ TASKS: dict[str, dict] = {
         "name": "Speech Transcription",
         "status": "active",
         # Served by the legacy /inferences/* endpoints (MODEL_FUNCTIONS).
-        "models": ["whisper-base", "whisper-large"],
+        "models": ["whisper-base"],
         "datasets": ["common-voice"],
     },
     "emotion": {

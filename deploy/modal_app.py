@@ -116,7 +116,10 @@ def warm(with_large: bool = False):
 
 @app.function(
     cpu=2.0,
-    memory=8192,
+    # Every model stays loaded once used: 6 deepfake detectors + Whisper
+    # (incl. large-v3) + emotion reach ~18 GiB. 8 GiB ran out of memory and
+    # restarted the container mid-request.
+    memory=20480,
     # One container only: models, uploads and session files live in its memory
     # and disk, so a second container would not see them.
     max_containers=1,
