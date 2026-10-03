@@ -61,7 +61,7 @@ BUILTIN_DATASETS: dict[str, BuiltinDataset] = {
             audio_subdir="flac",
             audio_extension=".flac",
             description="Studio-quality VCTK speech against 13 TTS and voice-conversion attacks. "
-            "Most detectors here were trained on its training partition.",
+            "Models B-F were trained on its training partition.",
             citation="Wang et al., Computer Speech & Language 2020",
             license="ODC-By 1.0",
         ),
@@ -72,7 +72,7 @@ BUILTIN_DATASETS: dict[str, BuiltinDataset] = {
             audio_subdir="flac",
             audio_extension=".flac",
             description="Crowdsourced audiobook speech against 16 newer attacks, some with "
-            "adversarial or codec processing. Unseen by every detector here.",
+            "adversarial or codec processing. Not in the training data of Models B-F.",
             citation="Wang et al., ASVspoof 5, Computer Speech & Language 2025",
             license="ODC-By 1.0",
         ),
@@ -83,7 +83,7 @@ BUILTIN_DATASETS: dict[str, BuiltinDataset] = {
             audio_subdir="wav",
             audio_extension=".wav",
             description="Public-figure speech and deepfakes collected from the internet. "
-            "Tests real-world generalisation; unseen by every detector here.",
+            "Tests real-world generalisation; not in the training data of Models B-F.",
             citation="Müller et al., Interspeech 2022",
             license="see attribution.txt of the release",
         ),

@@ -132,7 +132,7 @@ export const TASKS: TaskDefinition[] = [
     route: "/tasks/deepfake",
     name: "Audio Deepfake Detection",
     shortDescription:
-      "Score speech as bona fide or synthetic with six detectors that fail differently — a wav2vec2 XLS-R classifier, a spectrogram transformer, and four XLS-R back ends (state-space, graph-attention, layer-selection and nested Res2Net) — against an ASVspoof 2019 LA subset.",
+      "Score speech as bona fide or synthetic with six detectors that fail differently — a wav2vec2 XLS-R classifier, a spectrogram transformer, and four XLS-R back ends (state-space, graph-attention, layer-selection and nested Res2Net) — on three labelled subsets: ASVspoof 2019 LA, ASVspoof 5 and In-the-Wild.",
     status: "active",
     models: [
       { id: "xlsr-deepfake", label: "wav2vec2 XLS-R (Model A)", available: true },
@@ -147,7 +147,18 @@ export const TASKS: TaskDefinition[] = [
     // Speaker Verification's demo set, this dataset has no shared
     // /{dataset}/metadata route — AudioDatasetPanel special-cases it via
     // isDeepfakeDemoDataset and lists it from the task's own endpoint instead.
-    datasets: [{ id: "asvspoof2019-la", label: "ASVspoof 2019 LA (subset)", available: true }],
+    //
+    // ASVspoof 5 and In-the-Wild are available: false here ON PURPOSE. The
+    // deepfake page lists all three from GET /tasks/deepfake/builtin-datasets
+    // (which reports what is installed), so these entries are only its
+    // fallback. Marking them available would put them in BUILTIN_DATASET_IDS,
+    // and the shared panels would then request `/{dataset}/metadata` routes
+    // that do not exist for them.
+    datasets: [
+      { id: "asvspoof2019-la", label: "ASVspoof 2019 LA (subset)", available: true },
+      { id: "asvspoof5", label: "ASVspoof 5 (subset)", available: false },
+      { id: "in-the-wild", label: "In-the-Wild (subset)", available: false },
+    ],
     defaultDataset: "asvspoof2019-la",
     allowCustomDatasets: false,
     capabilities: {

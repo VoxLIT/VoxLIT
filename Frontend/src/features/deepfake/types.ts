@@ -1,4 +1,4 @@
-/** A recording in the ASVspoof 2019 LA demo subset, as returned by
+/** A recording in one of the built-in demo subsets, as returned by
  *  GET /tasks/deepfake/dataset/recordings. Carries no bona fide/spoof label —
  *  the ground truth is deliberately server-side only (see the backend's
  *  app/tasks/deepfake/dataset.py module docstring). */
