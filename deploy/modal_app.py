@@ -42,20 +42,29 @@ BACKEND_IGNORE = {
     "pretrained_models",
     ".DS_Store",
 }
-AMI_DIR = ROOT / "Backend" / "data" / "speaker_diarization" / "ami_subset"
+def _is_truncated_wav(path: Path) -> bool:
+    """True when a .wav's RIFF header promises more bytes than the file holds,
+    i.e. a download that stopped partway."""
+    try:
+        with open(path, "rb") as handle:
+            header = handle.read(8)
+        if header[:4] != b"RIFF":
+            return False
+        return int.from_bytes(header[4:8], "little") + 8 > path.stat().st_size
+    except OSError:
+        return True
 
 
 def _ignore_backend(path: Path) -> bool:
-    """Skip dev-only folders, plus any AMI meeting whose download never
-    finished (no matching .rttm), so a half-downloaded file never ships."""
+    """Skip dev-only folders, plus any .wav whose download never finished,
+    so a half-downloaded file never ships and breaks a dataset listing."""
     path = Path(path)
     rel = path.relative_to(ROOT / "Backend") if path.is_absolute() else path
     if BACKEND_IGNORE.intersection(rel.parts):
         return True
     full = ROOT / "Backend" / rel
-    if full.parent == AMI_DIR and full.suffix == ".wav":
-        meeting = full.name.split(".")[0]
-        return not (AMI_DIR / "rttm" / f"{meeting}.rttm").exists()
+    if full.suffix.lower() == ".wav" and full.is_file():
+        return _is_truncated_wav(full)
     return False
 
 
