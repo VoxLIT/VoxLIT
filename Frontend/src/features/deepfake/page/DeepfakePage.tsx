@@ -7,11 +7,19 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { API_BASE } from "@/lib/api";
 import type { TaskDefinition } from "@/tasks/types";
-import type { CustomDataset, DeepfakeEmbeddingProjection, EmbeddingRecording, RecordingInfo, UserClip } from "../types";
+import type { BuiltinDataset, CustomDataset, DeepfakeEmbeddingProjection, EmbeddingRecording, RecordingInfo, UserClip } from "../types";
 import { AllDetectors } from "./AllDetectors";
-import { errorMessage, listDatasetRecordings, listDatasets, listUserClips, postDeepfake, uploadUserClip } from "./api";
+import {
+  errorMessage,
+  listBuiltinDatasets,
+  listBuiltinRecordings,
+  listDatasetRecordings,
+  listDatasets,
+  listUserClips,
+  postDeepfake,
+  uploadUserClip,
+} from "./api";
 import { DatasetManager } from "./DatasetManager";
 import { HelpFormulas } from "./HelpFormulas";
 import { DetectorReport } from "./DetectorReport";
@@ -35,8 +43,9 @@ const MODEL_BLURBS: Record<string, string> = {
   "nes2net-x": "a tiny nested Res2Net over wav2vec2 features",
 };
 
-/** Dataset menu value for the built-in subset (custom ones use their name). */
+/** Dataset menu value prefix for a built-in subset (custom ones use their name). */
 const BUILTIN = "__builtin__";
+const builtinValue = (datasetId: string) => `${BUILTIN}:${datasetId}`;
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 const NAV = [
@@ -63,8 +72,23 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
   const model = availableModels.some((option) => option.id === storedModel) ? storedModel : fallbackModel;
   const modelLabel = task.models.find((option) => option.id === model)?.label ?? model;
 
-  const builtinDataset = task.datasets.find((dataset) => dataset.available);
-  // "" = the built-in ASVspoof subset; otherwise a custom dataset's name.
+  // The built-in labelled subsets (ASVspoof 2019 LA, ASVspoof 5, In-the-Wild),
+  // listed by the server; the registry's entry stands in until it answers.
+  const fallbackBuiltin = task.defaultDataset ?? task.datasets[0]?.id ?? "asvspoof2019-la";
+  const [builtinDatasets, setBuiltinDatasets] = useState<BuiltinDataset[]>(() =>
+    task.datasets.map((dataset) => ({
+      dataset_id: dataset.id,
+      label: dataset.label,
+      description: "",
+      citation: "",
+      license: "",
+      total_recordings: 0,
+      available: dataset.available,
+    })),
+  );
+  const [builtinId, setBuiltinId] = useSessionState("dataset.builtin", fallbackBuiltin);
+  const builtinDataset = builtinDatasets.find((dataset) => dataset.dataset_id === builtinId) ?? null;
+  // "" = the selected built-in subset; otherwise a custom dataset's name.
   const [customDataset, setCustomDataset] = useSessionState("dataset", "");
   const [customDatasets, setCustomDatasets] = useState<CustomDataset[]>([]);
   const [datasetsVersion, setDatasetsVersion] = useState(0);
@@ -95,6 +119,21 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
       .catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    listBuiltinDatasets()
+      .then((datasets) => {
+        if (datasets.length) setBuiltinDatasets(datasets);
+        // A remembered subset that is unknown or no longer installed falls back
+        // to the default, rather than leaving the page on an empty listing.
+        if (!datasets.some((dataset) => dataset.dataset_id === builtinId && dataset.available)) {
+          setBuiltinId(fallbackBuiltin);
+        }
+      })
+      .catch(() => undefined);
+    // builtinId is read once on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Custom datasets for the toolbar's Dataset menu; a remembered one that has
   // since expired or been deleted falls back to the built-in subset.
   useEffect(() => {
@@ -116,10 +155,7 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
         if (customDataset) {
           list = await listDatasetRecordings(customDataset);
         } else {
-          const response = await fetch(`${API_BASE}/tasks/deepfake/dataset/recordings`, { credentials: "include" });
-          const payload = await response.json();
-          if (!response.ok) throw new Error(payload.detail || "Could not list recordings.");
-          list = payload.recordings as RecordingInfo[];
+          list = await listBuiltinRecordings(builtinId);
         }
         if (cancelled) return;
         setRecordings(list);
@@ -134,7 +170,7 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
     return () => {
       cancelled = true;
     };
-  }, [customDataset, datasetsVersion]);
+  }, [customDataset, builtinId, datasetsVersion]);
 
   // Placed on the same map as the dataset, so the visitor can see which
   // dataset clips the detector thinks their voice resembles.
@@ -142,7 +178,7 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
   const userClipKey = userClipIds.join(",");
 
   // The dataset's file count is part of the key, so adding files redraws the map.
-  const datasetKey = customDataset ? `custom-${customDataset}-${recordings.length}` : "builtin";
+  const datasetKey = customDataset ? `custom-${customDataset}-${recordings.length}` : `builtin-${builtinId}`;
   const projectionKey = `map.projection.${datasetKey}.${model}.${method}.${is3D ? 3 : 2}.${userClipKey}`;
   const lastRefresh = useRef(refreshToken);
 
@@ -169,7 +205,7 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
         reduction_method: method,
         n_components: is3D ? 3 : 2,
         ...(userClipIds.length ? { extra_recording_ids: userClipIds } : {}),
-        ...(customDataset ? { dataset: customDataset } : {}),
+        ...(customDataset ? { dataset: customDataset } : { builtin: builtinId }),
       },
       controller.signal,
     )
@@ -247,7 +283,12 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
   }, [recordings, selectedId, select]);
 
   const changeDataset = (value: string) => {
-    setCustomDataset(value === BUILTIN ? "" : value);
+    if (value.startsWith(`${BUILTIN}:`)) {
+      setBuiltinId(value.slice(BUILTIN.length + 1));
+      setCustomDataset("");
+    } else {
+      setCustomDataset(value === BUILTIN ? "" : value);
+    }
     setSelectedId("");
     setProjection(null);
   };
@@ -345,20 +386,34 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
                       <TooltipContent className="max-w-xs space-y-1">
                         <p className="text-xs">Select the audio dataset to analyse.</p>
                         <p className="text-xs">
-                          The built-in subset is labelled; custom datasets are yours, and need a label file before the
-                          Detector report can measure EER on them.
+                          Three labelled 200-clip subsets ship with the task: ASVspoof 2019 LA (what most detectors
+                          trained on), ASVspoof 5 (newer attacks and codecs) and In-the-Wild (real-world speech). Custom
+                          datasets are yours, and need a label file before the Detector report can measure EER on them.
                         </p>
+                        {!customDataset && builtinDataset?.description && (
+                          <p className="text-xs text-muted-foreground">
+                            {builtinDataset.label}: {builtinDataset.description} ({builtinDataset.citation})
+                          </p>
+                        )}
                       </TooltipContent>
                     </Tooltip>
                   </div>
-                  <Select value={customDataset || BUILTIN} onValueChange={changeDataset}>
+                  <Select value={customDataset || builtinValue(builtinId)} onValueChange={changeDataset}>
                     <SelectTrigger className="h-7 w-48 border-border text-xs" aria-label="Dataset">
                       <SelectValue placeholder="To be added" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={BUILTIN} className="text-xs" disabled={!builtinDataset}>
-                        {builtinDataset?.label ?? "Built-in dataset"}
-                      </SelectItem>
+                      {builtinDatasets.map((dataset) => (
+                        <SelectItem
+                          key={dataset.dataset_id}
+                          value={builtinValue(dataset.dataset_id)}
+                          className="text-xs"
+                          disabled={!dataset.available}
+                        >
+                          {dataset.label}
+                          {dataset.available ? "" : " (not installed)"}
+                        </SelectItem>
+                      ))}
                       {customDatasets.length > 0 && (
                         <>
                           <SelectItem disabled value="separator" className="text-xs">
@@ -580,11 +635,13 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
             A single verdict can be lucky. Test the detector on every labelled clip and see the mistakes it makes.
           </SectionTitle>
           <DetectorReport
-            key={customDataset || BUILTIN}
+            key={customDataset || builtinValue(builtinId)}
             model={model}
             modelLabel={modelLabel}
             datasetSize={recordings.length}
             customDataset={customDataset || null}
+            builtinDataset={builtinId}
+            builtinLabel={builtinDataset?.label ?? builtinId}
             labelledCount={activeCustom?.labels.matched_files ?? null}
           />
         </section>

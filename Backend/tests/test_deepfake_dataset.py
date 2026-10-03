@@ -170,3 +170,54 @@ def test_load_ground_truth_raises_when_protocol_absent(fake_dataset_dir):
 
     with pytest.raises(dataset.DatasetUnavailable):
         dataset.load_ground_truth()
+
+
+# ── The other built-in subsets (ASVspoof 5, In-the-Wild) ─────────────────────
+
+ITW_PROTOCOL = {"0": ("unattributed", "spoof"), "1": ("-", "bonafide")}
+
+
+def _build_fake_itw(root):
+    dataset_dir = root / "in_the_wild"
+    (dataset_dir / "wav").mkdir(parents=True)
+    for file_id in ITW_PROTOCOL:
+        (dataset_dir / "wav" / f"{file_id}.wav").write_bytes(b"RIFF-fake-audio")
+    (dataset_dir / "protocol.txt").write_text(
+        "\n".join(f"Barack_Obama {f} - {s} {k}" for f, (s, k) in ITW_PROTOCOL.items()) + "\n"
+    )
+
+
+def test_every_builtin_dataset_is_listed_installed_or_not(fake_dataset_dir, tmp_path):
+    _build_fake_itw(tmp_path)
+    listed = {entry["dataset_id"]: entry for entry in dataset.list_builtin_datasets()}
+
+    assert set(listed) == {"asvspoof2019-la", "asvspoof5", "in-the-wild"}
+    assert listed["asvspoof2019-la"]["total_recordings"] == 4
+    assert listed["in-the-wild"]["total_recordings"] == 2
+    assert listed["in-the-wild"]["audio_extensions"] == [".wav"]
+    assert listed["asvspoof5"]["available"] is False
+
+
+def test_other_datasets_get_namespaced_ids_and_keep_the_original_ones(fake_dataset_dir, tmp_path):
+    _build_fake_itw(tmp_path)
+    original = dataset.list_recordings()
+    itw = dataset.list_recordings("in-the-wild")
+
+    # ASVspoof 2019 LA ids are unchanged, so cached scores stay valid.
+    assert original[0].recording_id == dataset._recording_id_for(original[0].display_filename)
+    assert {r.display_filename for r in itw} == {"0.wav", "1.wav"}
+    assert not {r.recording_id for r in itw} & {r.recording_id for r in original}
+    # Any built-in id resolves without naming its dataset.
+    assert dataset.resolve_recording_path(itw[0].recording_id).parent.name == "wav"
+    assert dataset.audio_media_type(dataset.resolve_recording_path(itw[0].recording_id)) == "audio/wav"
+
+
+def test_ground_truth_is_read_per_dataset(fake_dataset_dir, tmp_path):
+    _build_fake_itw(tmp_path)
+    assert dataset.load_ground_truth("in-the-wild") == ITW_PROTOCOL
+    assert dataset.load_ground_truth() == FAKE_PROTOCOL
+
+
+def test_unknown_dataset_ids_are_refused(fake_dataset_dir):
+    with pytest.raises(dataset.UnknownDataset):
+        dataset.list_recordings("../asvspoof2019_la")

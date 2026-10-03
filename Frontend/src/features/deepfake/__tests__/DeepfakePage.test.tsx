@@ -66,7 +66,7 @@ const routeFetch = (overrides: Record<string, unknown> = {}) => {
     ...overrides,
   };
   const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
-    const key = Object.keys(bodies).find((path) => url.endsWith(`/tasks/deepfake/${path}`));
+    const key = Object.keys(bodies).find((path) => url.split("?")[0].endsWith(`/tasks/deepfake/${path}`));
     return {
       ok: key !== undefined,
       status: key ? 200 : 404,

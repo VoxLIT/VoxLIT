@@ -24,7 +24,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.redis import cache_result, get_result
 
-from .dataset import DatasetUnavailable, list_recordings, resolve_recording_path
+from .dataset import DatasetUnavailable, list_recordings_with_paths
 from .projection import reduce_embedding_matrix
 from .service import file_sha256, get_model_spec, run_embedding
 
@@ -67,20 +67,22 @@ async def project_dataset(
     n_components: int,
     extra_clips: list[tuple[str, str, Path]] | None = None,
     base_clips: list[tuple[str, str, Path]] | None = None,
+    dataset_id: str | None = None,
 ) -> dict:
     """Score every recording, then reduce the embeddings to 2 or 3 axes.
 
     `extra_clips` are the visitor's own clips as (id, display name, path). They
     are projected together with the dataset -- so they land on the same axes --
     and appended after it, flagged `uploaded: true`. `base_clips`, in the same
-    shape, replaces the demo dataset with a researcher's custom one.
+    shape, replaces the demo dataset with a researcher's custom one;
+    otherwise `dataset_id` picks which built-in subset to project.
     """
     extra_clips = list(extra_clips or [])
     spec = get_model_spec(model_key)
     if base_clips is None:
         base_clips = [
-            (recording.recording_id, recording.display_filename, resolve_recording_path(recording.recording_id))
-            for recording in list_recordings()
+            (recording.recording_id, recording.display_filename, path)
+            for recording, path in list_recordings_with_paths(dataset_id)
         ]
     if not base_clips:
         # The folder exists but holds no clips: nothing to plot, and an empty

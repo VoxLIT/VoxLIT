@@ -150,6 +150,17 @@ export interface Confusion {
 }
 
 /** A researcher's own dataset (Manage Datasets). Label COUNTS only. */
+/** One of the task's built-in labelled subsets. Counts only, never labels. */
+export interface BuiltinDataset {
+  dataset_id: string;
+  label: string;
+  description: string;
+  citation: string;
+  license: string;
+  total_recordings: number;
+  available: boolean;
+}
+
 export interface CustomDataset {
   dataset_name: string;
   created_at: number | null;
