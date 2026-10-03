@@ -20,9 +20,8 @@ from app.core.redis import cache_result, get_result
 from . import metrics
 from .dataset import (
     get_builtin_dataset,
-    list_recordings,
+    list_recordings_with_paths,
     load_ground_truth,
-    resolve_recording_path,
 )
 from .service import (
     THRESHOLD_VERSION,
@@ -104,8 +103,8 @@ def builtin_clips(
     """A built-in subset as (stem, path) pairs, its protocol, and its id."""
     dataset_id = get_builtin_dataset(dataset_id).dataset_id
     clips = [
-        (recording.display_filename.rsplit(".", 1)[0], resolve_recording_path(recording.recording_id))
-        for recording in list_recordings(dataset_id)
+        (recording.display_filename.rsplit(".", 1)[0], path)
+        for recording, path in list_recordings_with_paths(dataset_id)
     ]
     return clips, load_ground_truth(dataset_id), dataset_id
 

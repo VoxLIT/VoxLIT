@@ -171,6 +171,7 @@ def read_asvspoof5_protocol(protocols_tgz: Path, partition: str) -> dict[str, En
 
 def iter_complete_members(tar_path: Path):
     """Yield (archive, member) for every complete .flac in a possibly truncated tar."""
+    size = tar_path.stat().st_size
     try:
         with tarfile.open(tar_path, "r:") as archive:
             while True:
@@ -181,7 +182,7 @@ def iter_complete_members(tar_path: Path):
                 if member is None:
                     return
                 if member.isfile() and member.name.endswith(".flac"):
-                    if member.offset_data + member.size > tar_path.stat().st_size:
+                    if member.offset_data + member.size > size:
                         return  # cut short mid-file
                     yield archive, member
     except tarfile.ReadError as error:
@@ -209,6 +210,7 @@ def prepare_asvspoof5(args: argparse.Namespace) -> int:
 
     dest = DEST_ROOT / "asvspoof5"
     audio_dir = reset_dest(dest, "flac")
+    extracted: set[str] = set()
     for tar_path in args.audio:
         for archive, member in iter_complete_members(tar_path):
             file_id = Path(member.name).stem
@@ -216,8 +218,14 @@ def prepare_asvspoof5(args: argparse.Namespace) -> int:
                 continue
             with archive.extractfile(member) as source, open(audio_dir / f"{file_id}.flac", "wb") as target:
                 shutil.copyfileobj(source, target)
-    write_protocol(dest, chosen)
-    report(dest, audio_dir, chosen)
+            extracted.add(file_id)
+    # Only clips that made it to disk get a protocol line.
+    written = [entry for entry in chosen if entry[1] in extracted]
+    for entry in chosen:
+        if entry[1] not in extracted:
+            print(f"WARNING: could not extract {entry[1]}", file=sys.stderr)
+    write_protocol(dest, written)
+    report(dest, audio_dir, written)
     return 0
 
 

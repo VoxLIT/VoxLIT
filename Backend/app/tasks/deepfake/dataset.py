@@ -168,24 +168,28 @@ def _read_duration(path: Path) -> float | None:
         return None
 
 
-def _discover(dataset_id: str | None = None) -> list[RecordingInfo]:
-    recordings: list[RecordingInfo] = []
-    for entry in _iter_audio_files(_audio_dir(dataset_id), dataset_id):
-        recordings.append(
-            RecordingInfo(
-                recording_id=_recording_id_for(entry.name, dataset_id),
-                display_filename=entry.name,
-                extension=entry.suffix.lower(),
-                size_bytes=entry.stat().st_size,
-                duration_seconds=_read_duration(entry),
-            )
-        )
-    recordings.sort(key=lambda recording: recording.display_filename)
+def _info_for(path: Path, recording_id: str) -> RecordingInfo:
+    return RecordingInfo(
+        recording_id=recording_id,
+        display_filename=path.name,
+        extension=path.suffix.lower(),
+        size_bytes=path.stat().st_size,
+        duration_seconds=_read_duration(path),
+    )
+
+
+def _discover(dataset_id: str | None = None) -> list[tuple[RecordingInfo, Path]]:
+    recordings = [
+        (_info_for(entry, _recording_id_for(entry.name, dataset_id)), entry)
+        for entry in _iter_audio_files(_audio_dir(dataset_id), dataset_id)
+    ]
+    recordings.sort(key=lambda pair: pair[0].display_filename)
     return recordings
 
 
 def get_dataset_info(dataset_id: str | None = None) -> dict[str, object]:
-    """Summarize one built-in dataset without raising when it is absent."""
+    """Summarize one built-in dataset without raising when it is absent from
+    disk. An id outside BUILTIN_DATASETS still raises `UnknownDataset`."""
 
     dataset = get_builtin_dataset(dataset_id)
     try:
@@ -225,30 +229,30 @@ def list_recordings(dataset_id: str | None = None) -> list[RecordingInfo]:
     Carries no label: see the module docstring.
     """
 
+    return [info for info, _path in _discover(dataset_id)]
+
+
+def list_recordings_with_paths(dataset_id: str | None = None) -> list[tuple[RecordingInfo, Path]]:
+    """`list_recordings` plus each clip's path, for scoring a whole subset
+    without resolving every id again. Internal use only."""
+
     return _discover(dataset_id)
 
 
 def get_recording(recording_id: str) -> RecordingInfo:
     """Look up a single recording by its opaque id, in any built-in dataset."""
 
-    path, _dataset_id = _locate(recording_id)
-    return RecordingInfo(
-        recording_id=recording_id,
-        display_filename=path.name,
-        extension=path.suffix.lower(),
-        size_bytes=path.stat().st_size,
-        duration_seconds=_read_duration(path),
-    )
+    return _info_for(_locate(recording_id), recording_id)
 
 
-def _locate(recording_id: str) -> tuple[Path, str]:
+def _locate(recording_id: str) -> Path:
     found_any = False
     for dataset_id in BUILTIN_DATASETS:
         try:
             for entry in _iter_audio_files(_audio_dir(dataset_id), dataset_id):
                 found_any = True
                 if _recording_id_for(entry.name, dataset_id) == recording_id:
-                    return entry, dataset_id
+                    return entry
         except DatasetUnavailable:
             continue
     if not found_any:
@@ -262,7 +266,7 @@ def resolve_recording_path(recording_id: str) -> Path:
     simply miss and raise `RecordingNotFound` without touching the
     filesystem with untrusted input."""
 
-    return _locate(recording_id)[0]
+    return _locate(recording_id)
 
 
 def audio_media_type(path: Path) -> str:

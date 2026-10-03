@@ -24,7 +24,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.redis import cache_result, get_result
 
-from .dataset import DatasetUnavailable, list_recordings, resolve_recording_path
+from .dataset import DatasetUnavailable, list_recordings_with_paths
 from .projection import reduce_embedding_matrix
 from .service import file_sha256, get_model_spec, run_embedding
 
@@ -81,8 +81,8 @@ async def project_dataset(
     spec = get_model_spec(model_key)
     if base_clips is None:
         base_clips = [
-            (recording.recording_id, recording.display_filename, resolve_recording_path(recording.recording_id))
-            for recording in list_recordings(dataset_id)
+            (recording.recording_id, recording.display_filename, path)
+            for recording, path in list_recordings_with_paths(dataset_id)
         ]
     if not base_clips:
         # The folder exists but holds no clips: nothing to plot, and an empty

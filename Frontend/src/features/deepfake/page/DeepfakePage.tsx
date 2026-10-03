@@ -123,7 +123,11 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
     listBuiltinDatasets()
       .then((datasets) => {
         if (datasets.length) setBuiltinDatasets(datasets);
-        if (!datasets.some((dataset) => dataset.dataset_id === builtinId)) setBuiltinId(fallbackBuiltin);
+        // A remembered subset that is unknown or no longer installed falls back
+        // to the default, rather than leaving the page on an empty listing.
+        if (!datasets.some((dataset) => dataset.dataset_id === builtinId && dataset.available)) {
+          setBuiltinId(fallbackBuiltin);
+        }
       })
       .catch(() => undefined);
     // builtinId is read once on purpose.

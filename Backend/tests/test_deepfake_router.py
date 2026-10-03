@@ -196,7 +196,6 @@ async def test_run_surfaces_an_unloadable_model_as_503(
     assert response.status_code == 503
 
 
-@pytest.mark.asyncio
 async def test_builtin_datasets_route_lists_the_three_subsets_without_labels(client, monkeypatch, tmp_path):
     from app.core.settings import settings
 
