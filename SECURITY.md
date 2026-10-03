@@ -51,7 +51,7 @@ When developing or deploying VoxLIT:
 
 3. **Uploaded audio.** Treat uploaded files as untrusted input. Validate file type and size, and do not keep user uploads longer than needed.
 
-4. **Data protection.** Voice recordings are personal data. Only process audio you have consent to use, and follow the licence terms of each reference dataset (VoxCeleb, AMI, RAVDESS, Common Voice, ASVspoof).
+4. **Data protection.** Voice recordings are personal data. Only process audio you have consent to use, and follow the licence terms of each reference dataset (VoxCeleb, AMI, RAVDESS, Common Voice, ASVspoof 2019, ASVspoof 5, In-the-Wild).
 
 5. **API exposure.** Restrict CORS origins (`ALLOWED_ORIGINS`) to the frontend's domain, serve everything over HTTPS, and add authentication and rate limiting before exposing compute-heavy endpoints publicly.
 

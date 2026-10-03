@@ -188,7 +188,34 @@ export const HelpFormulas = () => (
           </table>
         </Section>
 
-        <Section title="13. Custom datasets">
+        <Section title="13. Built-in datasets">
+          <p>
+            Three labelled subsets of 200 clips each (100 bona fide, 100 spoof, fixed seed), chosen from the Dataset menu.
+            Comparing them shows how far a detector&apos;s accuracy travels beyond the data it was trained on.
+          </p>
+          <ul className="list-disc space-y-1 pl-4">
+            <li>
+              <strong>ASVspoof 2019 LA</strong>: studio speech against 13 text-to-speech and voice-conversion attacks
+              (A07–A19). Every detector here was trained on its training partition, so this is the in-domain test.
+            </li>
+            <li>
+              <strong>ASVspoof 5</strong>: crowdsourced audiobook speech against 16 newer attacks (A17–A32, a different
+              catalogue from 2019&apos;s ids of the same name), some with codec or adversarial processing. Unseen in
+              training.
+            </li>
+            <li>
+              <strong>In-the-Wild</strong>: real and fake speech of public figures collected from the internet, spread
+              across speakers. The release names no generator, so its fakes are grouped as &ldquo;unattributed&rdquo;.
+              Unseen in training.
+            </li>
+          </ul>
+          <p>
+            The 51 % vs 23 % silence figure in section 8 is measured on the ASVspoof 2019 LA subset; run the silence
+            ablation on each dataset rather than assuming the same shortcut.
+          </p>
+        </Section>
+
+        <Section title="14. Custom datasets">
           <p>
             Manage Datasets stores your files as 16 kHz mono WAV. A label file (CSV <code>filename,label[,attack]</code>
             or ASVspoof protocol lines) is matched on file names without extension and used only for aggregate metrics;
@@ -200,6 +227,8 @@ export const HelpFormulas = () => (
         <Section title="References">
           <ul className="list-disc space-y-1 pl-4 text-xs">
             <li>Wang, X. et al. (2020). ASVspoof 2019: A large-scale public database of synthesized, converted and replayed speech. Computer Speech &amp; Language 64.</li>
+            <li>Wang, X. et al. (2025). ASVspoof 5: Design, collection and validation of resources for spoofing, deepfake, and adversarial attack detection using crowdsourced speech. Computer Speech &amp; Language.</li>
+            <li>Müller, N. M. et al. (2022). Does Audio Deepfake Detection Generalize? Interspeech 2022.</li>
             <li>Müller, N. M. et al. (2021). Speech is Silver, Silence is Golden: What do ASVspoof-trained Models Really Learn? ASVspoof 2021 Workshop.</li>
             <li>Martin, A. et al. (1997). The DET curve in assessment of detection task performance. Eurospeech.</li>
             <li>Efron, B. &amp; Tibshirani, R. (1993). An Introduction to the Bootstrap. Chapman &amp; Hall.</li>

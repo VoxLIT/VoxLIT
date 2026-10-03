@@ -2,7 +2,8 @@
 
 Endpoints live in router.py (mounted at /tasks/deepfake by main.py); model
 loading and inference live in service.py; read-only dataset discovery for the
-ASVspoof 2019 LA subset lives in dataset.py.
+three built-in subsets (ASVspoof 2019 LA, ASVspoof 5, In-the-Wild) lives in
+dataset.py.
 """
 from .router import router
 

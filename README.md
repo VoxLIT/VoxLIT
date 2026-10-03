@@ -41,7 +41,7 @@ VoxLIT is organised as a homepage and five task workbenches. Each workbench ship
 | **Emotion Recognition** | wav2vec2 | RAVDESS | Class probabilities, attention, embeddings, saliency, perturbations |
 | **Speaker Verification** | ECAPA-TDNN, ResNet34-LM | VoxCeleb1 demo subset | Similarity scores, calibrated thresholds, EER / FAR / FRR, perturbation sweeps |
 | **Speaker Diarization** | pyannote 3.1, Reverb v1, Reverb v2 | AMI subset | Speaker timelines, cluster saliency and compactness, before/after perturbation |
-| **Audio Deepfake Detection** | wav2vec2 XLS-R, AST, XLSR-Mamba, Wav2Vec2-AASIST, XLSR-SLS, Nes2Net-X | ASVspoof 2019 LA subset | Six-detector comparison, silence ablation, time-aligned attribution, embedding maps, EER and DET analysis per attack |
+| **Audio Deepfake Detection** | wav2vec2 XLS-R, AST, XLSR-Mamba, Wav2Vec2-AASIST, XLSR-SLS, Nes2Net-X | ASVspoof 2019 LA, ASVspoof 5 and In-the-Wild subsets | Six-detector comparison across in-domain, newer-attack and real-world data, silence ablation, time-aligned attribution, embedding maps, EER and DET analysis per attack |
 
 ## Interpretability Toolkit
 
@@ -150,7 +150,7 @@ To report a vulnerability, please follow the [Security Policy](SECURITY.md).
 ## Acknowledgments
 
 - Inspired by Google's [Learning Interpretability Tool (LIT)](https://github.com/PAIR-code/lit).
-- Built on open models and datasets from the speech research community, including Whisper, wav2vec2, pyannote, VoxCeleb, AMI, RAVDESS, Common Voice and ASVspoof.
+- Built on open models and datasets from the speech research community, including Whisper, wav2vec2, pyannote, VoxCeleb, AMI, RAVDESS, Common Voice, ASVspoof 2019, ASVspoof 5 and In-the-Wild.
 
 ## License
 
