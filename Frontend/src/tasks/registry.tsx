@@ -147,12 +147,17 @@ export const TASKS: TaskDefinition[] = [
     // Speaker Verification's demo set, this dataset has no shared
     // /{dataset}/metadata route — AudioDatasetPanel special-cases it via
     // isDeepfakeDemoDataset and lists it from the task's own endpoint instead.
-    // The page lists these from GET /tasks/deepfake/builtin-datasets and greys
-    // out any not installed; these entries are its fallback until that answers.
+    //
+    // ASVspoof 5 and In-the-Wild are available: false here ON PURPOSE. The
+    // deepfake page lists all three from GET /tasks/deepfake/builtin-datasets
+    // (which reports what is installed), so these entries are only its
+    // fallback. Marking them available would put them in BUILTIN_DATASET_IDS,
+    // and the shared panels would then request `/{dataset}/metadata` routes
+    // that do not exist for them.
     datasets: [
       { id: "asvspoof2019-la", label: "ASVspoof 2019 LA (subset)", available: true },
-      { id: "asvspoof5", label: "ASVspoof 5 (subset)", available: true },
-      { id: "in-the-wild", label: "In-the-Wild (subset)", available: true },
+      { id: "asvspoof5", label: "ASVspoof 5 (subset)", available: false },
+      { id: "in-the-wild", label: "In-the-Wild (subset)", available: false },
     ],
     defaultDataset: "asvspoof2019-la",
     allowCustomDatasets: false,

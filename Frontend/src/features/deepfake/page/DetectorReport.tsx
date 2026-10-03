@@ -431,7 +431,7 @@ export const DetectorReport = ({
           cut are exact: decisions only change at a clip&rsquo;s score, so they equal those at the next evaluated threshold. {describeGenerators
             ? "Generator ids are the ASVspoof 2019 LA attack systems (Wang et al., 2020): TTS is text-to-speech, VC is voice conversion, and TTS + VC converts TTS output; the label under each id names its waveform generator. A16 and A19 reuse training-set systems, the other eleven are unseen in training."
             : customDataset === null && builtinDataset === "asvspoof5"
-              ? "Generator ids are the ASVspoof 5 evaluation attacks A17–A32 (Wang et al., 2025), a different catalogue from ASVspoof 2019 LA's ids of the same name, and none was seen by any detector here in training."
+              ? "Generator ids are the ASVspoof 5 evaluation attacks A17–A32 (Wang et al., 2025), a different catalogue from ASVspoof 2019 LA's ids of the same name, and none is in the training data of Models B–F."
               : customDataset === null && builtinDataset === "in-the-wild"
                 ? "In-the-Wild does not name the system behind each fake, so every one is grouped as \u201cunattributed\u201d."
                 : "Generator ids come from this dataset's own label file and are shown as given."}

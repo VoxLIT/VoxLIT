@@ -196,17 +196,18 @@ export const HelpFormulas = () => (
           <ul className="list-disc space-y-1 pl-4">
             <li>
               <strong>ASVspoof 2019 LA</strong>: studio speech against 13 text-to-speech and voice-conversion attacks
-              (A07–A19). Every detector here was trained on its training partition, so this is the in-domain test.
+              (A07–A19). Models B–F were trained on its training partition, so this is their in-domain test (Model A&apos;s
+              training data is not documented).
             </li>
             <li>
               <strong>ASVspoof 5</strong>: crowdsourced audiobook speech against 16 newer attacks (A17–A32, a different
-              catalogue from 2019&apos;s ids of the same name), some with codec or adversarial processing. Unseen in
-              training.
+              catalogue from 2019&apos;s ids of the same name), some with codec or adversarial processing. Not in the
+              training data of Models B–F.
             </li>
             <li>
               <strong>In-the-Wild</strong>: real and fake speech of public figures collected from the internet, spread
               across speakers. The release names no generator, so its fakes are grouped as &ldquo;unattributed&rdquo;.
-              Unseen in training.
+              Not in the training data of Models B–F.
             </li>
           </ul>
           <p>
