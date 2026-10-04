@@ -13,3 +13,7 @@ CLAUDE.md
 # Papers and slide decks
 *.pdf
 *.pptx
+
+# Python bytecode
+__pycache__/
+*.py[cod]
