@@ -24,7 +24,7 @@ import { DatasetManager } from "./DatasetManager";
 import { HelpFormulas } from "./HelpFormulas";
 import { DetectorReport } from "./DetectorReport";
 import { ListeningHeatmap } from "./ListeningHeatmap";
-import { readSession, useSessionState, writeSession } from "./session";
+import { forgetRevealedClip, readSession, useSessionState, writeSession } from "./session";
 import { SilenceTest } from "./SilenceTest";
 import { ErrorNote, FeatureImage, PrimaryButton, SectionTitle } from "./ui";
 import { VerdictPanel } from "./VerdictPanel";
@@ -98,6 +98,13 @@ export const DeepfakePage = ({ task }: { task: TaskDefinition }) => {
   const [recordings, setRecordings] = useState<RecordingInfo[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useSessionState("selected", "");
+  // Leaving a clip hides its results; they stay stored, and coming back shows
+  // them again from storage only once their buttons are clicked.
+  const previousSelectedId = useRef(selectedId);
+  useEffect(() => {
+    if (previousSelectedId.current !== selectedId) forgetRevealedClip(previousSelectedId.current);
+    previousSelectedId.current = selectedId;
+  }, [selectedId]);
   const [userClips, setUserClips] = useState<UserClip[]>([]);
   const uploadInput = useRef<HTMLInputElement>(null);
 

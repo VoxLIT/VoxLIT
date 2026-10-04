@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { Bot, Dices, Ear, Gauge, Sparkles, UserRound } from "lucide-react";
 import type { DeepfakeResult, RecordingInfo } from "../types";
 import { audioUrlFor, errorMessage, formatBytes, formatSeconds, postDeepfake } from "./api";
-import { readSession, resultKey, useSessionState, writeSession } from "./session";
+import { loadResult, markRevealed, readRevealed, readSession, resultKey, useSessionState, writeSession } from "./session";
 import { leanWords, formatScore } from "./palette";
 import { usePalette } from "./theme";
 import { ScoreDial } from "./ScoreDial";
@@ -36,7 +36,7 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
   const runKey = resultKey("run", model, recordingId ?? "");
   const [guess, setGuess] = useState<Guess>(() => (recordingId ? readSession<Guess>(guessKey) : null));
   const [result, setResult] = useState<DeepfakeResult | null>(() =>
-    recordingId ? readSession<DeepfakeResult>(runKey) : null,
+    recordingId ? readRevealed<DeepfakeResult>(runKey) : null,
   );
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +49,7 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
   useEffect(() => {
     latestRequest.current += 1;
     setGuess(recordingId ? readSession<Guess>(guessKey) : null);
-    setResult(recordingId ? readSession<DeepfakeResult>(runKey) : null);
+    setResult(recordingId ? readRevealed<DeepfakeResult>(runKey) : null);
     setError(null);
     setRunning(false);
     // guessKey and runKey are derived from recordingId and model.
@@ -62,11 +62,14 @@ export const VerdictPanel = ({ model, modelLabel, recording, onSurprise, surpris
     setRunning(true);
     setError(null);
     try {
-      const payload = await postDeepfake<DeepfakeResult>("run", { model, recording_id: recordingId });
+      const { payload, stored } = await loadResult(runKey, () =>
+        postDeepfake<DeepfakeResult>("run", { model, recording_id: recordingId }),
+      );
       if (request !== latestRequest.current) return;
       setResult(payload);
-      writeSession(runKey, payload);
-      if (guess) {
+      markRevealed(runKey);
+      // A stored answer was already counted when it first came back.
+      if (guess && !stored) {
         const agreed = (guess === "fake") === (payload.decision === "spoof");
         setTally((current) => ({ asked: current.asked + 1, agreed: current.agreed + (agreed ? 1 : 0) }));
       }
