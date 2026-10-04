@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type WaveSurfer from "wavesurfer.js";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Info } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,9 +8,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Slider } from "@/components/ui/slider";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { WaveformViewer } from "@/components/audio/WaveformViewer";
+import { FrequencyBandGuideTooltip, formatBandLabel } from "./frequencyBands";
 import { InfoTooltip } from "./InfoTooltip";
+import { IntegratedGradientsView } from "./IntegratedGradientsView";
 import {
   isFrequencySaliency,
+  isIntegratedGradientsSaliency,
+  isIntegratedGradientsUnsupportedError,
   type AnySaliencyMapResponse,
   type SaliencyAxis,
   type SaliencySegment,
@@ -69,7 +73,6 @@ const CLASSIFICATION_UNDERLINE: Record<SegmentClassification, string> = {
 const formatScore = (value: number) => value.toFixed(4);
 const formatSigned = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(4)}`;
 const formatTime = (seconds: number) => `${seconds.toFixed(2)}s`;
-const formatHzRange = (lowHz: number, highHz: number) => `${Math.round(lowHz)}–${Math.round(highHz)} Hz`;
 
 // Band changes are shown compactly; toFixed keeps the minus sign, so only "+" is added.
 const formatSignedShort = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(3)}`;
@@ -77,6 +80,7 @@ const formatSignedShort = (value: number) => `${value >= 0 ? "+" : ""}${value.to
 /** Explains the baseline score that every occlusion bar is measured against. */
 const BaselineSimilarityCard = ({ result }: { result: AnySaliencyMapResponse }) => {
   const isCluster = result.reference_type === "cluster";
+  const isGradient = isIntegratedGradientsSaliency(result);
   const isAboveThreshold = result.baseline_similarity >= result.threshold;
   return (
     <div className="rounded-md border p-2.5" data-testid="baseline-similarity-card">
@@ -91,7 +95,11 @@ const BaselineSimilarityCard = ({ result }: { result: AnySaliencyMapResponse }) 
             It is usually higher than &apos;Avg. similarity to cluster&apos;, which averages one-by-one comparisons,
             because averaging cancels out each clip&apos;s noise.
           </p>
-          <p>Each bar below shows how much this number drops when that part is silenced.</p>
+          <p>
+            {isGradient
+              ? "The map below splits the gap between this number and a silent clip's score across time and frequency."
+              : "Each bar below shows how much this number drops when that part is silenced."}
+          </p>
         </InfoTooltip>
       </div>
       <div className="text-2xl font-semibold tabular-nums leading-tight">
@@ -142,8 +150,8 @@ export interface SpeakerSaliencyMapProps {
   segmentCount: number;
   onSegmentCountChange: (segmentCount: number) => void;
   clusterBadge?: { label: string; color: string } | null;
-  /** Which occlusion view is shown. Uncontrolled (starting at "time") when
-   *  omitted. */
+  /** Which view is shown: time occlusion, frequency occlusion, or
+   *  Integrated Gradients. Uncontrolled (starting at "time") when omitted. */
   occlusionAxis?: SaliencyAxis;
   onOcclusionAxisChange?: (axis: SaliencyAxis) => void;
 }
@@ -172,14 +180,23 @@ export const SpeakerSaliencyMap = ({
 
   const handleAxisChange = (value: string) => {
     // Radix emits "" when the active item is clicked again -- keep the axis.
-    if (value !== "time" && value !== "frequency") return;
+    if (value !== "time" && value !== "frequency" && value !== "integrated_gradients") return;
     setInternalAxis(value);
     onOcclusionAxisChange?.(value);
   };
 
   // Each view only ever renders a result produced for its own axis.
-  const result = axis === "time" && axisResult && !isFrequencySaliency(axisResult) ? axisResult : null;
+  const result =
+    axis === "time" && axisResult && !isFrequencySaliency(axisResult) && !isIntegratedGradientsSaliency(axisResult)
+      ? axisResult
+      : null;
   const frequencyResult = axis === "frequency" && isFrequencySaliency(axisResult) ? axisResult : null;
+  const gradientResult =
+    axis === "integrated_gradients" && isIntegratedGradientsSaliency(axisResult) ? axisResult : null;
+
+  // A model without a gradient path is a limitation to explain, not a
+  // failure -- and it says nothing about the occlusion views.
+  const isGradientUnsupported = isIntegratedGradientsUnsupportedError(error);
 
   const maxBandInfluence = frequencyResult
     ? Math.max(...frequencyResult.bands.map((band) => band.influence_strength), 0)
@@ -320,6 +337,9 @@ export const SpeakerSaliencyMap = ({
                 <ToggleGroupItem value="frequency" className="h-7 px-2 text-xs">
                   Frequency
                 </ToggleGroupItem>
+                <ToggleGroupItem value="integrated_gradients" className="h-7 px-2 text-xs">
+                  Gradient (IG)
+                </ToggleGroupItem>
               </ToggleGroup>
               {axis === "time" ? (
                 <div className="flex min-w-[10rem] flex-1 items-center gap-2 text-xs text-muted-foreground">
@@ -339,11 +359,22 @@ export const SpeakerSaliencyMap = ({
                 <div className="flex-1" />
               )}
               <Button size="sm" variant="outline" onClick={() => onGenerate?.()} disabled={!onGenerate || isLoading}>
-                {isLoading ? "Running occlusion passes…" : generateLabel}
+                {isLoading
+                  ? axis === "integrated_gradients"
+                    ? "Computing gradients…"
+                    : "Running occlusion passes…"
+                  : generateLabel}
               </Button>
             </div>
 
-            {error && (
+            {isGradientUnsupported && axis === "integrated_gradients" && (
+              <Alert data-testid="ig-unsupported-notice">
+                <Info className="h-4 w-4" />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+
+            {error && !isGradientUnsupported && (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
                 <AlertTitle>Saliency map could not be generated</AlertTitle>
@@ -397,10 +428,16 @@ export const SpeakerSaliencyMap = ({
             )}
 
             {axis === "frequency" && (
-              <p className="text-[10px] text-muted-foreground">
-                Each band was silenced once. A green bar means removing it lowered the match score, so it supported
-                the match.
-              </p>
+              <div className="space-y-1">
+                <div className="flex items-center gap-1 text-xs font-medium">
+                  Similarity change per frequency band
+                  <FrequencyBandGuideTooltip />
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Each band was silenced once. A green bar means removing it lowered the match score, so it supported
+                  the match.
+                </p>
+              </div>
             )}
 
             {frequencyResult && (
@@ -418,11 +455,8 @@ export const SpeakerSaliencyMap = ({
                         className="flex items-center gap-2 text-xs"
                         title={`Occluded similarity: ${formatScore(band.occluded_similarity)} · ${CLASSIFICATION_LABEL[classification]}`}
                       >
-                        <div className="w-40 shrink-0">
-                          <div className="text-sm font-medium">{band.label}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {formatHzRange(band.low_hz, band.high_hz)}
-                          </div>
+                        <div className="w-44 shrink-0 text-xs font-medium tabular-nums">
+                          {formatBandLabel(band.band_index, band.low_hz, band.high_hz)}
                         </div>
                         <div className="h-3 flex-1 overflow-hidden rounded bg-muted">
                           <div
@@ -458,6 +492,20 @@ export const SpeakerSaliencyMap = ({
                     All band changes are below the minimum display-influence threshold.
                   </p>
                 )}
+              </div>
+            )}
+
+            {axis === "integrated_gradients" && (
+              <p className="text-[10px] text-muted-foreground">
+                Integrated Gradients traces how the score changes as the clip fades in from silence. Green regions
+                pushed the clip towards the reference voice; red pushed it away.
+              </p>
+            )}
+
+            {gradientResult && (
+              <div className={staleReason ? "space-y-3 opacity-50 pointer-events-none" : "space-y-3"}>
+                <BaselineSimilarityCard result={gradientResult} />
+                <IntegratedGradientsView result={gradientResult} />
               </div>
             )}
           </>

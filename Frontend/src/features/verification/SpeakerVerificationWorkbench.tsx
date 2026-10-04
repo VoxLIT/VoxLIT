@@ -36,7 +36,17 @@ interface RequestKey {
 type SaliencyRequestKey = RequestKey & { segmentCount: number };
 
 // One entry per occlusion axis, so switching axis never refetches.
-const EMPTY_SALIENCY_KEYS: Record<SaliencyAxis, SaliencyRequestKey | null> = { time: null, frequency: null };
+const EMPTY_SALIENCY_KEYS: Record<SaliencyAxis, SaliencyRequestKey | null> = {
+  time: null,
+  frequency: null,
+  integrated_gradients: null,
+};
+
+const SALIENCY_TITLE: Record<SaliencyAxis, string> = {
+  time: "Temporal occlusion saliency",
+  frequency: "Frequency-band occlusion saliency",
+  integrated_gradients: "Integrated Gradients saliency",
+};
 
 function keysEqual(a: RequestKey | null, b: RequestKey | null): boolean {
   if (a === null || a === undefined || b === null || b === undefined) return false;
@@ -478,7 +488,7 @@ export const SpeakerVerificationWorkbench = ({
       const verifyResult = payload as VerificationResult;
       setResult(verifyResult);
       setResultGeneratedFor(requestKey);
-      if (saliencyGeneratedFor.time || saliencyGeneratedFor.frequency) {
+      if (saliencyGeneratedFor.time || saliencyGeneratedFor.frequency || saliencyGeneratedFor.integrated_gradients) {
         setSaliencyResults(EMPTY_SALIENCY_RESULTS);
         setSaliencyError(null);
         setSaliencyGeneratedFor(EMPTY_SALIENCY_KEYS);
@@ -564,6 +574,8 @@ export const SpeakerVerificationWorkbench = ({
     if (requestAxis === "frequency") {
       formData.append("occlusion_axis", "frequency");
       formData.append("band_count", String(DEFAULT_SALIENCY_BAND_COUNT));
+    } else if (requestAxis === "integrated_gradients") {
+      formData.append("saliency_method", "integrated_gradients");
     }
 
     setIsSaliencyLoading(true);
@@ -898,7 +910,7 @@ export const SpeakerVerificationWorkbench = ({
                 </Card>
 
                 <SpeakerSaliencyMap
-                  title={saliencyAxis === "time" ? "Temporal occlusion saliency" : "Frequency-band occlusion saliency"}
+                  title={SALIENCY_TITLE[saliencyAxis]}
                   audioUrl={probeRef?.previewUrl}
                   requireCredentials={false}
                   result={saliencyResult}
