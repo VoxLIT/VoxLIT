@@ -186,6 +186,28 @@ describe("DeepfakePage", () => {
     expect(runs()).toBe(before);
   });
 
+  it("hides a clip's verdict after leaving it, and shows the stored one on click", async () => {
+    const fetchMock = routeFetch();
+    renderPage();
+    const library = document.getElementById("library")!;
+    const verdict = screen.getByRole("complementary", { name: "Verdict" });
+    await userEvent.click(await within(library).findByText(recordings.recordings[0].display_filename));
+    await userEvent.click(within(verdict).getByRole("button", { name: /ask the detector/i }));
+    await within(verdict).findByText("Sounds real");
+
+    await userEvent.click(within(library).getByText(recordings.recordings[1].display_filename));
+    await userEvent.click(within(library).getByText(recordings.recordings[0].display_filename));
+    // The old verdict fades out; the button is back once it has gone.
+    await waitFor(() => expect(within(verdict).queryByText("Sounds real")).toBeNull());
+
+    const runs = () => fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/run")).length;
+    const before = runs();
+    await userEvent.click(within(verdict).getByRole("button", { name: /ask the detector/i }));
+    expect(await within(verdict).findByText("Sounds real")).toBeInTheDocument();
+    // Shown from storage, not asked for again.
+    expect(runs()).toBe(before);
+  });
+
   it("reopens on the detector that was chosen before a refresh", () => {
     routeFetch();
     window.sessionStorage.setItem("voxlit.deepfake.model", JSON.stringify("ast-fakeaudio"));

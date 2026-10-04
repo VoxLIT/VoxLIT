@@ -5,7 +5,7 @@ import type { DeepfakeResult, DeepfakeSaliency, RecordingInfo, SilenceProbeResul
 import { readSaliencyVerdict } from "../SaliencyPanel";
 import { readProbeVerdict } from "../SilenceProbeCard";
 import { errorMessage, isUserClip, postDeepfake } from "./api";
-import { readSession, resultKey, writeSession } from "./session";
+import { loadResult, markRevealed, readRevealed, resultKey } from "./session";
 import { leanWords, formatScore } from "./palette";
 import { usePalette } from "./theme";
 import { ErrorNote, PrimaryButton, VerdictChip } from "./ui";
@@ -47,8 +47,9 @@ interface AllDetectorsProps {
 export const AllDetectors = ({ models, recording }: AllDetectorsProps) => {
   const { REAL, FAKE } = usePalette();
   const recordingId = recording?.recording_id ?? "";
-  // Results already computed for this clip, here or in the single-detector
-  // panels (they share storage keys), come back after a refresh.
+  // Results revealed for this clip, here or in the single-detector panels
+  // (they share storage keys), come back after a refresh. Stored results that
+  // are not revealed wait for their button.
   const restore = (): Record<string, Cell> => {
     if (!recordingId) return {};
     const restored: Record<string, Cell> = {};
@@ -56,7 +57,7 @@ export const AllDetectors = ({ models, recording }: AllDetectorsProps) => {
       const cell: Cell = emptyCell();
       let found = false;
       for (const feature of FEATURES) {
-        const stored = readSession<unknown>(resultKey(feature, option.id, recordingId));
+        const stored = readRevealed<unknown>(resultKey(feature, option.id, recordingId));
         if (stored) {
           (cell as unknown as Record<string, unknown>)[feature] = stored;
           found = true;
@@ -90,9 +91,12 @@ export const AllDetectors = ({ models, recording }: AllDetectorsProps) => {
         errors: { ...cell.errors, [feature]: undefined },
       }));
       try {
-        const payload = await postDeepfake<unknown>(feature, { model, recording_id: recordingId });
+        const key = resultKey(feature, model, recordingId);
+        const { payload } = await loadResult(key, () =>
+          postDeepfake<unknown>(feature, { model, recording_id: recordingId }),
+        );
         if (token !== generation.current) return false;
-        writeSession(resultKey(feature, model, recordingId), payload);
+        markRevealed(key);
         patch(model, (cell) => ({ ...cell, [feature]: payload, pending: cell.pending.filter((item) => item !== feature) }));
         return true;
       } catch (caught) {
