@@ -4,7 +4,9 @@
 #
 #   Speaker verification: every demo clip's embedding, for each model, via one
 #     /batch/dataset request (the page's batch view sends the same request;
-#     /verify and the saliency views reuse the per-clip embedding cache).
+#     /verify and the saliency views reuse the per-clip embedding cache), plus
+#     the Perturbation sweep (noise, pitch shift, time stretch) of
+#     rec_0154d898b28d04f8.wav, for each model.
 #   Speaker diarization: audio.wav and ES2004a (8-min excerpt) in the AMI demo
 #     folder, for each model. The other full meetings are left to compute live.
 #
@@ -17,6 +19,9 @@ MODAL="${MODAL:-$HOME/modal-cli/bin/modal}"
 TTL_SECONDS=$((90 * 24 * 60 * 60))
 # Clips are matched by size (the listing hides real names): audio.wav, ES2004a.
 DIARIZATION_FILE_BYTES="${DIARIZATION_FILE_BYTES:-272030 15343616}"
+# Demo clips whose Perturbation sweep is pre-computed (ids are fixed hashes of the filename).
+SWEEP_RECORDINGS="${SWEEP_RECORDINGS:-rec_0154d898b28d04f8}"
+SWEEP_TYPES="noise pitch_shift time_stretch"
 JAR="$(mktemp)"
 trap 'rm -f "$JAR"' EXIT
 failed=0
@@ -63,6 +68,18 @@ for model in $(models_of verification); do
   report "$model" "$status" $((SECONDS - start))
 done
 
+echo "== Speaker verification perturbation sweeps ($SWEEP_RECORDINGS)"
+for rec in $SWEEP_RECORDINGS; do
+  for model in $(models_of verification); do
+    for type in $SWEEP_TYPES; do
+      start=$SECONDS
+      status=$(post verification/perturbation/sweep \
+        "{\"model\":\"$model\",\"recording_id\":\"$rec\",\"perturbation_type\":\"$type\"}")
+      report "$rec $model $type" "$status" $((SECONDS - start))
+    done
+  done
+done
+
 echo "== Speaker diarization (audio.wav, ES2004a)"
 listing=$(get_json task-b/dataset/recordings)
 diarization_models=$(models_of task-b)
@@ -86,7 +103,7 @@ done
 echo "== Keep speaker results for 90 days"
 # Extend every matching key, then snapshot Redis to the cache volume.
 snippet="n=0
-for pattern in 'verify:emb:*' 'verify:batch:*' 'result:diar:*'; do
+for pattern in 'verify:emb:*' 'verify:batch:*' 'verify:pair:*' 'verify:sweep:*' 'result:diar:*'; do
   for k in \$(redis-cli --scan --pattern \"\$pattern\"); do
     redis-cli expire \"\$k\" $TTL_SECONDS >/dev/null; n=\$((n+1))
   done

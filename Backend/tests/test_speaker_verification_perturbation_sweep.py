@@ -440,6 +440,49 @@ async def test_sweep_endpoint_returns_result_and_creates_no_session_asset(
 
 
 @pytest.mark.asyncio
+async def test_sweep_endpoint_caches_result_per_clip_and_type(monkeypatch, client, fake_dataset_dir):
+    import importlib
+
+    from app.tasks.verification import cache
+
+    verification_router = importlib.import_module("app.tasks.verification.router")
+    _install(monkeypatch, _HashDerivedAdapter())
+    calls = []
+    real_sweep = verification_router.sweep_perturbation
+
+    def _counting_sweep(*args, **kwargs):
+        calls.append(args)
+        return real_sweep(*args, **kwargs)
+
+    monkeypatch.setattr(verification_router, "sweep_perturbation", _counting_sweep)
+    ttls = []
+    real_set = cache.redis_module.redis.set
+
+    async def _recording_set(key, value, ex=None):
+        if key.startswith("verify:sweep:"):
+            ttls.append(ex)
+        return await real_set(key, value, ex=ex)
+
+    monkeypatch.setattr(cache.redis_module.redis, "set", _recording_set)
+
+    async def _post(recording_id, perturbation_type="noise"):
+        response = await client.post(
+            "/tasks/verification/perturbation/sweep",
+            json={"model": "ecapa-tdnn", "recording_id": recording_id, "perturbation_type": perturbation_type},
+        )
+        assert response.status_code == 200
+        return response.json()
+
+    first = await _post(fake_dataset_dir[0])
+    assert await _post(fake_dataset_dir[0]) == first
+    assert len(calls) == 1
+    assert ttls == [90 * 24 * 60 * 60]
+
+    await _post(fake_dataset_dir[0], "pitch_shift")
+    assert len(calls) == 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("perturbation_type", ["time_masking", "nope"])
 async def test_sweep_endpoint_unsupported_type_is_422(monkeypatch, client, fake_dataset_dir, perturbation_type):
     _install(monkeypatch, _HashDerivedAdapter())

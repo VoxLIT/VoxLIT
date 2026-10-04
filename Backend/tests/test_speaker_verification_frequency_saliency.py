@@ -429,3 +429,38 @@ async def test_saliency_endpoint_returns_422_when_clip_is_too_short_for_band_occ
 
     assert response.status_code == 422
     assert "too short" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_cluster_saliency_is_cached_by_audio_and_cluster_id(client, tmp_path):
+    clips = {}
+    for name, content in (("rec_a", b"A"), ("rec_b", b"B"), ("rec_target", b"T")):
+        clips[name] = tmp_path / f"{name}.wav"
+        clips[name].write_bytes(content)
+
+    async def _resolve(recording_id: str, sid: str) -> Path:
+        return clips[recording_id]
+
+    with (
+        patch("app.tasks.verification.router._resolve_audio_source", new=_resolve),
+        patch(
+            "app.tasks.verification.router.compute_saliency_map",
+            side_effect=lambda *a, **kw: {"cluster_id": kw["cluster_id"], "bands": []},
+        ) as mock_compute,
+    ):
+        async def _post(**overrides):
+            response = await client.post(
+                "/tasks/verification/explain/saliency",
+                data={**_CLUSTER_FORM, "saliency_method": "integrated_gradients", **overrides},
+            )
+            assert response.status_code == 200
+            return response.json()
+
+        first = await _post()
+        assert await _post() == first
+        assert mock_compute.call_count == 1
+
+        await _post(cluster_id="Cluster 2")
+        await _post(reference_recording_ids=["rec_a", "rec_b"])
+        await _post(saliency_method="occlusion")
+        assert mock_compute.call_count == 4

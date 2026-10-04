@@ -727,3 +727,81 @@ async def test_batch_upload_response_uncached_matches_cached(monkeypatch, client
 
     assert uncached.status_code == cached.status_code == 200
     assert uncached.json() == cached.json()
+
+
+def _pair_files(enrollment: list[bytes], probe: bytes):
+    return [
+        ("enrollment_files", (f"e{i}.wav", io.BytesIO(content), "audio/wav"))
+        for i, content in enumerate(enrollment)
+    ] + [("probe_file", ("p.wav", io.BytesIO(probe), "audio/wav"))]
+
+
+@pytest.mark.asyncio
+async def test_verify_upload_result_cache_hit_skips_inference(monkeypatch, client):
+    embeddings = {
+        content: _make_embedding(float(i + 1))
+        for i, content in enumerate([CONTENT_A, CONTENT_B, CONTENT_C, CONTENT_D])
+    }
+    adapter = _install_fake_adapter(monkeypatch, embeddings)
+    enrollment = [CONTENT_A, CONTENT_B, CONTENT_C]
+
+    first = await client.post(
+        "/tasks/verification/verify",
+        data={"model": "ecapa-tdnn"},
+        files=_pair_files(enrollment, CONTENT_D),
+    )
+    assert first.status_code == 200
+    calls_after_first = len(adapter.calls)
+    assert calls_after_first == 4
+
+    second = await client.post(
+        "/tasks/verification/verify",
+        data={"model": "ecapa-tdnn"},
+        files=_pair_files(enrollment, CONTENT_D),
+    )
+    assert second.status_code == 200
+    assert len(adapter.calls) == calls_after_first
+    assert second.json() == first.json()
+
+    # A different probe is a different pair: recomputed, not served stale.
+    embeddings[CONTENT_E] = _make_embedding(5.0)
+    third = await client.post(
+        "/tasks/verification/verify",
+        data={"model": "ecapa-tdnn"},
+        files=_pair_files(enrollment, CONTENT_E),
+    )
+    assert third.status_code == 200
+    assert len(adapter.calls) > calls_after_first
+
+
+@pytest.mark.asyncio
+async def test_enrollment_saliency_cache_is_keyed_by_options(monkeypatch, client):
+    import importlib
+
+    verification_router = importlib.import_module("app.tasks.verification.router")
+
+    calls: list[dict] = []
+
+    def _fake_saliency(model, reference_paths, target_path, **kwargs):
+        calls.append(kwargs)
+        return {"model": model, "segments": [], "call": len(calls)}
+
+    monkeypatch.setattr(verification_router, "compute_saliency_map", _fake_saliency)
+    enrollment = [CONTENT_A, CONTENT_B, CONTENT_C]
+
+    async def _post(**extra):
+        response = await client.post(
+            "/tasks/verification/explain/saliency",
+            data={"model": "ecapa-tdnn", "reference_type": "enrollment", "segment_count": "8", **extra},
+            files=_pair_files(enrollment, CONTENT_D),
+        )
+        assert response.status_code == 200
+        return response.json()
+
+    first = await _post()
+    assert await _post() == first
+    assert len(calls) == 1
+
+    await _post(occlusion_axis="frequency")
+    await _post(segment_count="10")
+    assert len(calls) == 3

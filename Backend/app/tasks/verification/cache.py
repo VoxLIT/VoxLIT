@@ -14,6 +14,7 @@ absolute paths, and auth secrets are never placed in a key or a payload.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import math
@@ -26,9 +27,15 @@ from app.core import redis as redis_module
 
 EMBEDDING_CACHE_SCHEMA_VERSION = "embedding-cache-v1"
 BATCH_RESULT_SCHEMA_VERSION = "batch-result-v4"
+PAIR_RESULT_SCHEMA_VERSION = "pair-result-v1"
+SWEEP_RESULT_SCHEMA_VERSION = "sweep-result-v1"
+PERTURBATION_RESULT_SCHEMA_VERSION = "perturbation-result-v1"
 
 EMBEDDING_CACHE_TTL_SECONDS = 24 * 60 * 60
 BATCH_RESULT_CACHE_TTL_SECONDS = 6 * 60 * 60
+PAIR_RESULT_CACHE_TTL_SECONDS = 90 * 24 * 60 * 60
+SWEEP_RESULT_CACHE_TTL_SECONDS = 90 * 24 * 60 * 60
+PERTURBATION_RESULT_CACHE_TTL_SECONDS = 90 * 24 * 60 * 60
 
 
 def hash_audio_files(paths: Sequence[str | Path]) -> list[str]:
@@ -301,4 +308,214 @@ async def set_batch_result(key: str, result: dict[str, object]) -> None:
     try:
         await redis_module.redis.set(key, json.dumps(envelope), ex=BATCH_RESULT_CACHE_TTL_SECONDS)
     except RedisError:
+        return
+
+
+def pair_result_cache_key(
+    *,
+    endpoint: str,
+    model_key: str,
+    model_id: str,
+    revision: str,
+    preprocessing_version: str,
+    pair_threshold_version: str,
+    pair_threshold_value: float,
+    enrollment_sha256: Sequence[str],
+    probe_sha256: str,
+    options: dict[str, object],
+) -> str:
+    """Identity for a Pair Verification response (`/verify`, an enrolment
+    saliency map, or a cluster saliency map): ordered reference hashes,
+    probe/target hash, and every request option that changes the response."""
+
+    digest = _canonical_digest(
+        {
+            "schema": PAIR_RESULT_SCHEMA_VERSION,
+            "endpoint": endpoint,
+            "preprocessing_version": preprocessing_version,
+            "model_key": model_key,
+            "model_id": model_id,
+            "revision": revision,
+            "pair_threshold_version": pair_threshold_version,
+            "pair_threshold_value": pair_threshold_value,
+            "enrollment": list(enrollment_sha256),
+            "probe": probe_sha256,
+            "options": options,
+        }
+    )
+    return f"verify:pair:{endpoint}:{model_key}:{digest}"
+
+
+async def get_pair_result(key: str, *, model_key: str) -> dict[str, object] | None:
+    """Cached response for a pair key, or None on any miss/corruption."""
+
+    try:
+        raw = await redis_module.redis.get(key)
+    except RedisError:
+        return None
+    if raw is None:
+        return None
+
+    try:
+        envelope = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+    if not isinstance(envelope, dict) or envelope.get("schema") != PAIR_RESULT_SCHEMA_VERSION:
+        return None
+    if envelope.get("model_key") != model_key:
+        return None
+    result = envelope.get("result")
+    return result if isinstance(result, dict) else None
+
+
+async def set_pair_result(key: str, model_key: str, result: dict[str, object]) -> None:
+    envelope = {"schema": PAIR_RESULT_SCHEMA_VERSION, "model_key": model_key, "result": result}
+    try:
+        await redis_module.redis.set(key, json.dumps(envelope), ex=PAIR_RESULT_CACHE_TTL_SECONDS)
+    except (RedisError, TypeError, ValueError):
+        return
+
+
+def sweep_result_cache_key(
+    *,
+    model_key: str,
+    model_id: str,
+    revision: str,
+    preprocessing_version: str,
+    pair_threshold_version: str,
+    pair_threshold_value: float,
+    audio_sha256: str,
+    perturbation_type: str,
+    grid: object,
+) -> str:
+    """Identity for a Perturbation sweep response: the source clip's content
+    hash, the perturbation type and its strength grid (so a grid change
+    invalidates old results)."""
+
+    digest = _canonical_digest(
+        {
+            "schema": SWEEP_RESULT_SCHEMA_VERSION,
+            "preprocessing_version": preprocessing_version,
+            "model_key": model_key,
+            "model_id": model_id,
+            "revision": revision,
+            "pair_threshold_version": pair_threshold_version,
+            "pair_threshold_value": pair_threshold_value,
+            "audio_sha256": audio_sha256,
+            "perturbation_type": perturbation_type,
+            "grid": grid,
+        }
+    )
+    return f"verify:sweep:{model_key}:{digest}"
+
+
+async def get_sweep_result(key: str, *, model_key: str) -> dict[str, object] | None:
+    """Cached sweep for a key, or None on any miss/corruption."""
+
+    try:
+        raw = await redis_module.redis.get(key)
+    except RedisError:
+        return None
+    if raw is None:
+        return None
+
+    try:
+        envelope = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+    if not isinstance(envelope, dict) or envelope.get("schema") != SWEEP_RESULT_SCHEMA_VERSION:
+        return None
+    if envelope.get("model_key") != model_key:
+        return None
+    result = envelope.get("result")
+    return result if isinstance(result, dict) else None
+
+
+async def set_sweep_result(key: str, model_key: str, result: dict[str, object]) -> None:
+    envelope = {"schema": SWEEP_RESULT_SCHEMA_VERSION, "model_key": model_key, "result": result}
+    try:
+        await redis_module.redis.set(key, json.dumps(envelope), ex=SWEEP_RESULT_CACHE_TTL_SECONDS)
+    except (RedisError, TypeError, ValueError):
+        return
+
+
+def perturbation_result_cache_key(
+    *,
+    model_key: str,
+    model_id: str,
+    revision: str,
+    preprocessing_version: str,
+    pair_threshold_version: str,
+    pair_threshold_value: float,
+    audio_sha256: str,
+    perturbation_type: str,
+    params: dict[str, object],
+) -> str:
+    """Identity for a single `/perturbation` comparison: the source clip's
+    content hash, the perturbation type and its normalized params."""
+
+    digest = _canonical_digest(
+        {
+            "schema": PERTURBATION_RESULT_SCHEMA_VERSION,
+            "preprocessing_version": preprocessing_version,
+            "model_key": model_key,
+            "model_id": model_id,
+            "revision": revision,
+            "pair_threshold_version": pair_threshold_version,
+            "pair_threshold_value": pair_threshold_value,
+            "audio_sha256": audio_sha256,
+            "perturbation_type": perturbation_type,
+            "params": params,
+        }
+    )
+    return f"verify:perturb:{model_key}:{digest}"
+
+
+async def get_perturbation_result(
+    key: str, *, model_key: str
+) -> tuple[dict[str, object], bytes] | None:
+    """Cached (comparison result, perturbed WAV bytes), or None on any
+    miss/corruption."""
+
+    try:
+        raw = await redis_module.redis.get(key)
+    except RedisError:
+        return None
+    if raw is None:
+        return None
+
+    try:
+        envelope = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+    if not isinstance(envelope, dict) or envelope.get("schema") != PERTURBATION_RESULT_SCHEMA_VERSION:
+        return None
+    if envelope.get("model_key") != model_key:
+        return None
+    result = envelope.get("result")
+    audio_b64 = envelope.get("audio_b64")
+    if not isinstance(result, dict) or not isinstance(audio_b64, str):
+        return None
+    try:
+        audio = base64.b64decode(audio_b64, validate=True)
+    except ValueError:
+        return None
+    return (result, audio) if audio else None
+
+
+async def set_perturbation_result(
+    key: str, model_key: str, result: dict[str, object], audio: bytes
+) -> None:
+    envelope = {
+        "schema": PERTURBATION_RESULT_SCHEMA_VERSION,
+        "model_key": model_key,
+        "result": result,
+        "audio_b64": base64.b64encode(audio).decode("ascii"),
+    }
+    try:
+        await redis_module.redis.set(key, json.dumps(envelope), ex=PERTURBATION_RESULT_CACHE_TTL_SECONDS)
+    except (RedisError, TypeError, ValueError):
         return

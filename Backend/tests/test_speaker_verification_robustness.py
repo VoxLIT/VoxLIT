@@ -1043,3 +1043,45 @@ async def test_perturbation_endpoint_unexpected_exception_cleans_up_temp_file(
     session_dir = tmp_path / sid
     leftover = list(session_dir.iterdir()) if session_dir.is_dir() else []
     assert leftover == []
+
+
+@pytest.mark.asyncio
+async def test_perturbation_endpoint_cache_hit_skips_compute_and_still_saves_asset(client, fake_dataset_dir):
+    from unittest.mock import MagicMock
+
+    from app.tasks.verification import cache
+
+    recording_id = fake_dataset_dir[0]
+    fake = MagicMock(side_effect=_fake_perturb_and_compare)
+
+    async def _post(params):
+        with patch("app.tasks.verification.router.perturb_and_compare", new=fake):
+            response = await client.post(
+                "/tasks/verification/perturbation",
+                json={
+                    "model": "ecapa-tdnn",
+                    "recording_id": recording_id,
+                    "perturbation": {"type": "pitch_shift", "params": params},
+                },
+            )
+        assert response.status_code == 200
+        return response.json()
+
+    first = await _post({"pitch_shift_semitones": 2})
+    # 2 and 2.0 normalize to the same params, so this is a cache hit.
+    second = await _post({"pitch_shift_semitones": 2.0})
+    assert fake.call_count == 1
+
+    # Each request still gets its own playable session asset.
+    assert second["session_asset"]["asset_id"] != first["session_asset"]["asset_id"]
+    assert {k: v for k, v in second.items() if k != "session_asset"} == {
+        k: v for k, v in first.items() if k != "session_asset"
+    }
+    for body in (first, second):
+        audio = await client.get(f"/tasks/verification/session-assets/{body['session_asset']['asset_id']}/audio")
+        assert audio.status_code == 200
+    assert "perturbed_embedding" not in second
+
+    await _post({"pitch_shift_semitones": -2})
+    assert fake.call_count == 2
+    assert cache.PERTURBATION_RESULT_CACHE_TTL_SECONDS == 90 * 24 * 60 * 60

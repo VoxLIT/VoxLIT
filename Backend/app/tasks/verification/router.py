@@ -33,7 +33,12 @@ from .dataset import (
     list_recordings,
     resolve_recording_path,
 )
-from .robustness import perturb_and_compare, sweep_perturbation
+from .robustness import (
+    SWEEP_GRIDS,
+    perturb_and_compare,
+    sweep_perturbation,
+    validate_perturbation_params,
+)
 from .service import (
     PAIR_THRESHOLD_VERSION,
     PREPROCESSING_VERSION,
@@ -318,6 +323,44 @@ async def _resolve_verification_inputs(
     return enrollment_paths, probe_path
 
 
+async def _cached_pair_result(
+    endpoint: str,
+    model_key: str,
+    enrollment_paths: list[Path],
+    probe_path: Path,
+    options: dict[str, Any],
+    compute,
+) -> dict[str, Any]:
+    """Pair Verification response with a Redis cache in front of it, keyed
+    by the audio content (not filenames), so re-uploading the same clips
+    returns the stored result. Cache failures fall through to `compute`."""
+
+    spec = get_model_spec(model_key)
+    try:
+        hashes = await run_in_threadpool(cache.hash_audio_files, [*enrollment_paths, probe_path])
+    except OSError:
+        return await run_in_threadpool(compute)
+    key = cache.pair_result_cache_key(
+        endpoint=endpoint,
+        model_key=model_key,
+        model_id=spec.model_id,
+        revision=spec.revision,
+        preprocessing_version=PREPROCESSING_VERSION,
+        pair_threshold_version=PAIR_THRESHOLD_VERSION,
+        pair_threshold_value=spec.threshold,
+        enrollment_sha256=hashes[:-1],
+        probe_sha256=hashes[-1],
+        options=options,
+    )
+    cached = await cache.get_pair_result(key, model_key=model_key)
+    if cached is not None:
+        return cached
+
+    result = await run_in_threadpool(compute)
+    await cache.set_pair_result(key, model_key, result)
+    return result
+
+
 @router.post("/verify")
 async def run_verification(
     request: Request,
@@ -347,11 +390,13 @@ async def run_verification(
                 temp_path,
             )
 
-            return await run_in_threadpool(
-                verify_speaker,
+            return await _cached_pair_result(
+                "verify",
                 model,
                 enrollment_paths,
                 probe_path,
+                {},
+                lambda: verify_speaker(model, enrollment_paths, probe_path),
             )
     except HTTPException:
         raise
@@ -834,16 +879,35 @@ async def run_saliency_map(
                 )
                 response_cluster_id, response_target_id = None, probe_recording_id
 
-            return await run_in_threadpool(
-                compute_saliency_map,
+            def compute():
+                return compute_saliency_map(
+                    model,
+                    reference_paths,
+                    target_path,
+                    reference_type=reference_type,
+                    cluster_id=response_cluster_id,
+                    target_recording_id=response_target_id,
+                    segment_count=segment_count,
+                    **axis_kwargs,
+                )
+
+            # Cluster saliency is keyed by the caller-chosen members' audio
+            # plus the echoed cluster id, so a different membership or label
+            # is a different entry.
+            options: dict[str, Any] = {
+                "segment_count": segment_count,
+                "target_recording_id": response_target_id,
+                **axis_kwargs,
+            }
+            if reference_type == "cluster":
+                options["cluster_id"] = response_cluster_id
+            return await _cached_pair_result(
+                "cluster-saliency" if reference_type == "cluster" else "saliency",
                 model,
                 reference_paths,
                 target_path,
-                reference_type=reference_type,
-                cluster_id=response_cluster_id,
-                target_recording_id=response_target_id,
-                segment_count=segment_count,
-                **axis_kwargs,
+                options,
+                compute,
             )
     except HTTPException:
         raise
@@ -889,6 +953,43 @@ async def run_perturbation_comparison(payload: PerturbationRequest, request: Req
     source_path = await _resolve_audio_source(payload.recording_id, validated_sid)
 
     audio_hash = (await run_in_threadpool(cache.hash_audio_files, [source_path]))[0]
+
+    # Every perturbation is deterministic (noise is seeded), so the
+    # comparison and the perturbed audio are cached by clip content + type +
+    # normalized params. A hit still saves the audio as a fresh session asset.
+    # Params that fail validation skip the cache and get the usual 422 below.
+    perturbation_key = None
+    try:
+        normalized_params = validate_perturbation_params(
+            payload.perturbation.type, payload.perturbation.params
+        )
+    except ValueError:
+        normalized_params = None
+    if normalized_params is not None:
+        perturbation_key = cache.perturbation_result_cache_key(
+            model_key=payload.model,
+            model_id=spec.model_id,
+            revision=spec.revision,
+            preprocessing_version=PREPROCESSING_VERSION,
+            pair_threshold_version=PAIR_THRESHOLD_VERSION,
+            pair_threshold_value=spec.threshold,
+            audio_sha256=audio_hash,
+            perturbation_type=payload.perturbation.type,
+            params=normalized_params,
+        )
+        cached_perturbation = await cache.get_perturbation_result(perturbation_key, model_key=payload.model)
+        if cached_perturbation is not None:
+            cached_result, cached_audio = cached_perturbation
+            temp_path = await run_in_threadpool(session_assets.begin_asset_write, validated_sid, ".wav")
+            try:
+                await run_in_threadpool(temp_path.write_bytes, cached_audio)
+            except Exception:
+                await run_in_threadpool(temp_path.unlink, missing_ok=True)
+                raise
+            return await _promote_perturbation_asset(
+                temp_path, validated_sid, payload, cached_result
+            )
+
     embedding_key = cache.embedding_cache_key(
         model_key=payload.model,
         model_id=spec.model_id,
@@ -929,10 +1030,23 @@ async def run_perturbation_comparison(payload: PerturbationRequest, request: Req
         result.pop("original_embedding", None)
     result.pop("perturbed_embedding", None)
 
+    if perturbation_key is not None:
+        perturbed_audio = await run_in_threadpool(temp_path.read_bytes)
+        await cache.set_perturbation_result(perturbation_key, payload.model, result, perturbed_audio)
+
+    return await _promote_perturbation_asset(temp_path, validated_sid, payload, result)
+
+
+async def _promote_perturbation_asset(
+    temp_path: Path, sid: str, payload: PerturbationRequest, result: dict[str, Any]
+) -> dict[str, Any]:
+    """Save the perturbed clip at `temp_path` as a new session asset and
+    build the `/perturbation` response around it."""
+
     try:
         asset_metadata = await session_assets.promote_asset(
             temp_path,
-            validated_sid,
+            sid,
             origin="perturbation",
             extension=".wav",
             source_asset_id=payload.recording_id,
@@ -974,6 +1088,27 @@ async def run_perturbation_sweep(payload: PerturbationSweepRequest, request: Req
     source_path = await _resolve_audio_source(payload.recording_id, validated_sid)
 
     audio_hash = (await run_in_threadpool(cache.hash_audio_files, [source_path]))[0]
+
+    # The sweep is deterministic (fixed grid, seeded noise), so the whole
+    # response is cached by clip content; unknown types skip the cache and
+    # get the usual 422 from `sweep_perturbation`.
+    sweep_key = None
+    if payload.perturbation_type in SWEEP_GRIDS:
+        sweep_key = cache.sweep_result_cache_key(
+            model_key=payload.model,
+            model_id=spec.model_id,
+            revision=spec.revision,
+            preprocessing_version=PREPROCESSING_VERSION,
+            pair_threshold_version=PAIR_THRESHOLD_VERSION,
+            pair_threshold_value=spec.threshold,
+            audio_sha256=audio_hash,
+            perturbation_type=payload.perturbation_type,
+            grid=SWEEP_GRIDS[payload.perturbation_type],
+        )
+        cached_sweep = await cache.get_sweep_result(sweep_key, model_key=payload.model)
+        if cached_sweep is not None:
+            return {**cached_sweep, "source_recording_id": payload.recording_id}
+
     embedding_key = cache.embedding_cache_key(
         model_key=payload.model,
         model_id=spec.model_id,
@@ -1001,6 +1136,8 @@ async def run_perturbation_sweep(payload: PerturbationSweepRequest, request: Req
     original_embedding = result.pop("original_embedding")
     if cached_embedding is None:
         await cache.set_embedding(embedding_key, payload.model, original_embedding)
+    if sweep_key is not None:
+        await cache.set_sweep_result(sweep_key, payload.model, result)
 
     return {**result, "source_recording_id": payload.recording_id}
 
