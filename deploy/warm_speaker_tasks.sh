@@ -4,9 +4,15 @@
 #
 #   Speaker verification: every demo clip's embedding, for each model, via one
 #     /batch/dataset request (the page's batch view sends the same request;
-#     /verify and the saliency views reuse the per-clip embedding cache), plus
-#     the Perturbation sweep (noise, pitch shift, time stretch) of
-#     rec_0154d898b28d04f8.wav, for each model.
+#     /verify and the saliency views reuse the per-clip embedding cache), plus,
+#     for each model:
+#       - Pair Verification of id11100_01-05 (enrolment) vs id11100_13 (probe),
+#         uploaded as the page does: /verify and the time, frequency and
+#         Integrated Gradients saliency maps;
+#       - for rec_0154d898b28d04f8.wav: the Perturbation sweep (noise, pitch
+#         shift, time stretch), a +2 semitone pitch shift ("Run Perturbation"),
+#         and the time, frequency and IG cluster saliency maps against its
+#         cluster in the all-clip batch.
 #   Speaker diarization: audio.wav and ES2004a (8-min excerpt) in the AMI demo
 #     folder, for each model. The other full meetings are left to compute live.
 #
@@ -22,6 +28,20 @@ DIARIZATION_FILE_BYTES="${DIARIZATION_FILE_BYTES:-272030 15343616}"
 # Demo clips whose Perturbation sweep is pre-computed (ids are fixed hashes of the filename).
 SWEEP_RECORDINGS="${SWEEP_RECORDINGS:-rec_0154d898b28d04f8}"
 SWEEP_TYPES="noise pitch_shift time_stretch"
+# Pair Verification demo: enrolment clips then the probe, from the demo dataset.
+PAIR_DIR="${PAIR_DIR:-$(cd "$(dirname "$0")/.." && pwd)/Backend/data/speaker_verification/vox_indian_demo_92}"
+PAIR_ENROLLMENT="id11100_01.wav id11100_02.wav id11100_03.wav id11100_04.wav id11100_05.wav"
+PAIR_PROBE="id11100_13.wav"
+# Single "Run Perturbation" requests: <recording id> <perturbation JSON>.
+PERTURBATIONS=(
+  'rec_0154d898b28d04f8 {"type":"pitch_shift","params":{"pitch_shift_semitones":2}}'
+)
+# Saliency views as the page requests them (segment_count is always sent).
+SALIENCY_VIEWS=(
+  "time:-F segment_count=8"
+  "frequency:-F segment_count=8 -F occlusion_axis=frequency -F band_count=8"
+  "integrated_gradients:-F segment_count=8 -F saliency_method=integrated_gradients"
+)
 JAR="$(mktemp)"
 trap 'rm -f "$JAR"' EXIT
 failed=0
@@ -48,6 +68,15 @@ post() {  # post <path> <json>  -> prints HTTP status; follows Modal's 303s
   curl -sL -b "$JAR" -c "$JAR" --max-time 3600 --max-redirs 60 \
     "$API/$1" -H 'content-type: application/json' -d "$2" \
     -o /dev/null -w '%{http_code}'
+}
+post_form() {  # post_form <path> <curl -F args...>  -> prints HTTP status
+  local path="$1"; shift
+  curl -sL -b "$JAR" -c "$JAR" --max-time 3600 --max-redirs 60 \
+    "$API/$path" "$@" -o /dev/null -w '%{http_code}'
+}
+post_body() {  # post_body <path> <json>  -> prints the response body
+  curl -sL -b "$JAR" -c "$JAR" --max-time 3600 --max-redirs 60 \
+    "$API/$1" -H 'content-type: application/json' -d "$2"
 }
 get_json() { curl -sL -b "$JAR" -c "$JAR" --max-time 600 "$API/$1"; }
 models_of() { get_json "$1/models" | python3 -c 'import json,sys; print(" ".join(m["key"] for m in json.load(sys.stdin)["models"]))'; }
@@ -80,6 +109,65 @@ for rec in $SWEEP_RECORDINGS; do
   done
 done
 
+echo "== Speaker verification perturbations"
+for entry in "${PERTURBATIONS[@]}"; do
+  rec="${entry%% *}"; perturbation="${entry#* }"
+  for model in $(models_of verification); do
+    start=$SECONDS
+    status=$(post verification/perturbation \
+      "{\"model\":\"$model\",\"recording_id\":\"$rec\",\"perturbation\":$perturbation}")
+    report "$rec $model $perturbation" "$status" $((SECONDS - start))
+  done
+done
+
+echo "== Speaker verification pair ($PAIR_ENROLLMENT vs $PAIR_PROBE)"
+pair_files=()
+for name in $PAIR_ENROLLMENT; do pair_files+=(-F "enrollment_files=@$PAIR_DIR/$name;type=audio/wav"); done
+pair_files+=(-F "probe_file=@$PAIR_DIR/$PAIR_PROBE;type=audio/wav")
+for model in $(models_of verification); do
+  start=$SECONDS
+  status=$(post_form verification/verify -F "model=$model" "${pair_files[@]}")
+  report "$model verify" "$status" $((SECONDS - start))
+  for view in "${SALIENCY_VIEWS[@]}"; do
+    # shellcheck disable=SC2086  # the view's -F flags are meant to split
+    start=$SECONDS
+    status=$(post_form verification/explain/saliency -F "model=$model" -F reference_type=enrollment \
+      ${view#*:} "${pair_files[@]}")
+    report "$model saliency ${view%%:*}" "$status" $((SECONDS - start))
+  done
+done
+
+echo "== Speaker verification cluster saliency ($SWEEP_RECORDINGS)"
+for model in $(models_of verification); do
+  batch=$(post_body verification/batch/dataset "{\"model\":\"$model\",\"recording_ids\":$ids}")
+  for rec in $SWEEP_RECORDINGS; do
+    # Same membership the Cluster Saliency tab derives: the target's batch
+    # cluster label and every other clip with that label, in batch order.
+    members=$(python3 -c '
+import json, sys
+ids, batch, target = json.loads(sys.argv[1]), json.loads(sys.argv[2]), sys.argv[3]
+labels = batch.get("cluster_labels") or []
+if target not in ids or len(labels) != len(ids):
+    sys.exit(1)
+label = labels[ids.index(target)]
+print(label)
+for rid, l in zip(ids, labels):
+    if l == label and rid != target:
+        print(rid)' "$ids" "$batch" "$rec") || { echo "   $rec $model: no batch cluster"; failed=$((failed + 1)); continue; }
+    cluster=$(head -n1 <<<"$members")
+    refs=()
+    while read -r rid; do [[ -n "$rid" ]] && refs+=(-F "reference_recording_ids=$rid"); done < <(tail -n +2 <<<"$members")
+    if (( ${#refs[@]} == 0 )); then echo "   $rec $model: $cluster has no other members, skipped"; continue; fi
+    for view in "${SALIENCY_VIEWS[@]}"; do
+      start=$SECONDS
+      # shellcheck disable=SC2086
+      status=$(post_form verification/explain/saliency -F "model=$model" -F reference_type=cluster \
+        -F "target_recording_id=$rec" -F "cluster_id=$cluster" ${view#*:} "${refs[@]}")
+      report "$rec $model $cluster ($(( ${#refs[@]} / 2 )) refs) ${view%%:*}" "$status" $((SECONDS - start))
+    done
+  done
+done
+
 echo "== Speaker diarization (audio.wav, ES2004a)"
 listing=$(get_json task-b/dataset/recordings)
 diarization_models=$(models_of task-b)
@@ -103,7 +191,7 @@ done
 echo "== Keep speaker results for 90 days"
 # Extend every matching key, then snapshot Redis to the cache volume.
 snippet="n=0
-for pattern in 'verify:emb:*' 'verify:batch:*' 'verify:pair:*' 'verify:sweep:*' 'result:diar:*'; do
+for pattern in 'verify:emb:*' 'verify:batch:*' 'verify:pair:*' 'verify:sweep:*' 'verify:perturb:*' 'result:diar:*'; do
   for k in \$(redis-cli --scan --pattern \"\$pattern\"); do
     redis-cli expire \"\$k\" $TTL_SECONDS >/dev/null; n=\$((n+1))
   done
