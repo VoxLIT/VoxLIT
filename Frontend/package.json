@@ -49,8 +49,7 @@
     "tailwind-merge": "^2.5.2",
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.186.0",
-    "wavesurfer.js": "^7.10.1",
-    "zod": "^3.23.8"
+    "wavesurfer.js": "^7.10.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",
