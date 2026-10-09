@@ -36,7 +36,7 @@ interface EmbeddingPanelProps {
   onReproject?: ((reductionMethod: string, nComponents: number) => void) | null;
 }
 
-// Audio Frequency Analysis interface (reusing from ScalersVisualization)
+// Audio Frequency Analysis interface
 interface AudioFrequencyAnalysis {
   model_context: string;
   individual_analyses: Array<{
