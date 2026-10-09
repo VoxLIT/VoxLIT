@@ -68,8 +68,8 @@ def validate_dataset_name(dataset_name: str) -> str:
 
 
 #: Characters that are either path separators on some platform or illegal
-#: in a Windows filename (the project's primary development platform, per
-#: CLAUDE.md, which must still behave safely on Linux too). Rejecting all
+#: in a Windows filename (the project's primary development platform,
+#: which must still behave safely on Linux too). Rejecting all
 #: of them everywhere keeps stored filenames portable and avoids a raw,
 #: unhandled OS-level rename error surfacing as a generic 500/soft-failure
 #: instead of a clean, validated 400.

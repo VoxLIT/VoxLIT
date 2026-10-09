@@ -388,7 +388,7 @@ export const TaskWorkbench = ({ task }: TaskWorkbenchProps) => {
       setPredictionError(null);
 
       try {
-        let requestBody: any = {
+        const requestBody: any = {
           file_path: perturbationResult.perturbed_file
         };
 
@@ -453,7 +453,7 @@ export const TaskWorkbench = ({ task }: TaskWorkbenchProps) => {
       setPredictionError(null);
 
       try {
-        let requestBody: any = {};
+        const requestBody: any = {};
 
         if (selectedFile) {
           // Check if this is an uploaded file - more precise detection
@@ -565,7 +565,7 @@ export const TaskWorkbench = ({ task }: TaskWorkbenchProps) => {
       setPredictionError(null);
 
       try {
-        let requestBody: any = {
+        const requestBody: any = {
           model: model
         };
 
