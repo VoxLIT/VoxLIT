@@ -1,21 +1,29 @@
-# VoxLIT code ownership — keeps the three task workstreams independent.
-# Replace @member1/@member2/@member3 with real GitHub usernames.
+# VoxLIT code ownership — each owner is auto-requested to review changes in their area.
 
-# Per-member task areas (work here without cross-review)
-/Frontend/src/features/task-a/   @member1
-/Backend/app/tasks/task_a/       @member1
-/Frontend/src/features/task-b/   @member2
-/Backend/app/tasks/task_b/       @member2
-/Frontend/src/features/deepfake/ @member3
-/Backend/app/tasks/deepfake/     @member3
+# Per-member task areas
+# @chanuGX — deepfake detection and deployment
+/Frontend/src/features/deepfake/                  @chanuGX
+/Backend/app/tasks/deepfake/                      @chanuGX
+/Model\ Research/deepfake_evaluation/             @chanuGX
+/deploy/                                          @chanuGX
+
+# @Nethsith — speaker verification
+/Frontend/src/features/verification/              @Nethsith
+/Backend/app/tasks/verification/                  @Nethsith
+/Model\ Research/speaker_verification_evaluation/ @Nethsith
+
+# @hatheem-r — speaker diarization
+/Frontend/src/features/task-b/                    @hatheem-r
+/Backend/app/tasks/task_b/                        @hatheem-r
 
 # The central registries — review together (small, frequent one-line edits)
-/Frontend/src/tasks/             @member1 @member2 @member3
-/Backend/app/tasks/registry.py   @member1 @member2 @member3
-/Backend/app/tasks/__init__.py   @member1 @member2 @member3
+/Frontend/src/tasks/             @chanuGX @Nethsith @hatheem-r
+/Backend/app/tasks/registry.py   @chanuGX @Nethsith @hatheem-r
+/Backend/app/tasks/__init__.py   @chanuGX @Nethsith @hatheem-r
 
 # Shared/frozen code — changes need team review
-/Frontend/src/components/        @member1 @member2 @member3
-/Backend/app/services/           @member1 @member2 @member3
-/Backend/app/api/                @member1 @member2 @member3
-/Backend/app/main.py             @member1 @member2 @member3
+/Frontend/src/pages/Home.tsx     @chanuGX @Nethsith @hatheem-r
+/Frontend/src/components/        @chanuGX @Nethsith @hatheem-r
+/Backend/app/services/           @chanuGX @Nethsith @hatheem-r
+/Backend/app/api/                @chanuGX @Nethsith @hatheem-r
+/Backend/app/main.py             @chanuGX @Nethsith @hatheem-r
