@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, Loader2, Play, ShieldQuestion } from "lucide-react";
 import { API_BASE } from "@/lib/api";
+import { audioUrlFor } from "./page/api";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -94,9 +95,7 @@ export const DeepfakeWorkbench = ({ model, modelLabel, selectedFile, onFileSelec
     }
   };
 
-  const audioUrl = selectedRecordingId
-    ? `${API_BASE}/tasks/deepfake/dataset/recordings/${selectedRecordingId}/audio`
-    : undefined;
+  const audioUrl = selectedRecordingId ? audioUrlFor(selectedRecordingId) : undefined;
 
   return (
     <div className="h-full overflow-y-auto bg-background p-4 scrollbar-thin">
