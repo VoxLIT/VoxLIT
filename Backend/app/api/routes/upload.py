@@ -8,10 +8,10 @@ import librosa
 import soundfile as sf
 import requests
 from .inferences import run_inference
+from app.core.uploads import UPLOAD_DIR, resolve_upload
 router = APIRouter()
 
 # Ensure uploads directory exists
-UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 @router.get("/upload/test")
@@ -97,9 +97,9 @@ async def delete_uploaded_file(file_id: str):
     """
     Delete an uploaded file
     """
-    file_path = UPLOAD_DIR / file_id
-    
-    if not file_path.exists():
+    try:
+        file_path = resolve_upload(file_id)
+    except FileNotFoundError:
         raise HTTPException(status_code=404, detail="File not found")
     
     try:
@@ -118,9 +118,9 @@ async def serve_audio_file(file_id: str):
     """
     Serve an uploaded audio file for playback
     """
-    file_path = UPLOAD_DIR / file_id
-    
-    if not file_path.exists():
+    try:
+        file_path = resolve_upload(file_id)
+    except FileNotFoundError:
         raise HTTPException(status_code=404, detail="File not found")
     
     # Determine the correct media type based on file extension
@@ -151,9 +151,9 @@ async def get_audio_metadata(file_id: str):
     """
     Get metadata for an uploaded audio file
     """
-    file_path = UPLOAD_DIR / file_id
-    
-    if not file_path.exists():
+    try:
+        file_path = resolve_upload(file_id)
+    except FileNotFoundError:
         raise HTTPException(status_code=404, detail="File not found")
     
     try:

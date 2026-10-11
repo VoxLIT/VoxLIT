@@ -2,10 +2,10 @@ from fastapi import APIRouter, HTTPException, Body, Request
 import asyncio
 import logging
 from typing import Optional, Dict, Any
-from pathlib import Path
 from pydantic import BaseModel
 from app.services.saliency_service import generate_saliency
 from app.services.dataset_service import resolve_file
+from app.core.uploads import resolve_upload
 from app.core.redis import get_result, cache_result
 
 # Results are keyed by model + the resolved audio file, so they never go
@@ -15,7 +15,6 @@ RESULT_TTL_SECONDS = 90 * 24 * 60 * 60
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-UPLOAD_DIR = Path("uploads")
 SALIENCY_SCHEMA_VERSION = "v2"  # bump to bust stale caches after logic changes
 
 class SaliencyRequest(BaseModel):
@@ -47,7 +46,10 @@ async def generate_saliency_endpoint(http_request: Request, request: SaliencyReq
     
     resolved_path = None
     if request.file_path:
-        resolved_path = Path(request.file_path)
+        try:
+            resolved_path = resolve_upload(request.file_path)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
     elif request.dataset and request.dataset_file:
         try:
             resolved_path = resolve_file(request.dataset, request.dataset_file, session_id)
@@ -66,7 +68,8 @@ async def generate_saliency_endpoint(http_request: Request, request: SaliencyReq
     # Include file size and modification time for better cache key uniqueness
     file_stat = resolved_path.stat()
     file_content_hash = hashlib.md5(
-        f"{str(resolved_path)}_{file_stat.st_size}_{file_stat.st_mtime}".encode()
+        f"{str(resolved_path)}_{file_stat.st_size}_{file_stat.st_mtime}".encode(),
+        usedforsecurity=False
     ).hexdigest()
     cache_key = f"saliency_{SALIENCY_SCHEMA_VERSION}_{request.model}_{request.method}_{file_content_hash}"
     

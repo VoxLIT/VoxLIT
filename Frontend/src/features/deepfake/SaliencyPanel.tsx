@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Flame, Loader2 } from "lucide-react";
 import { API_BASE } from "@/lib/api";
+import { audioUrlFor } from "./page/api";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,9 +34,7 @@ export const SaliencyPanel = ({ model, modelLabel, recordingId }: SaliencyPanelP
   const [position, setPosition] = useState(0);
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  const audioUrl = recordingId
-    ? `${API_BASE}/tasks/deepfake/dataset/recordings/${recordingId}/audio`
-    : undefined;
+  const audioUrl = recordingId ? audioUrlFor(recordingId) : undefined;
 
   // An attribution belongs to one clip and one model.
   useEffect(() => {

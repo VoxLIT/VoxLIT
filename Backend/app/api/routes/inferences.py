@@ -25,6 +25,7 @@ from app.services.model_loader_service import (
     extract_whisper_attention_pairs,
 )
 from app.services.dataset_service import resolve_file
+from app.core.uploads import resolve_upload
 from app.core.redis import get_result, cache_result
 
 # Results are keyed by model + the resolved audio file, so they never go
@@ -35,7 +36,6 @@ router = APIRouter()
 
 # Define paths
 DATA_DIR = Path(__file__).resolve().parents[3] / "data"
-UPLOAD_DIR = Path("uploads")
 
 # Dataset directories
 DATASET_DIRS = {
@@ -108,7 +108,7 @@ async def check_batch_cache(
             resolved_path = resolve_file(dataset, filename, session_id)
             
             # Create cache key
-            file_content_hash = hashlib.md5(str(resolved_path).encode()).hexdigest()
+            file_content_hash = hashlib.md5(str(resolved_path).encode(), usedforsecurity=False).hexdigest()
             cache_key = f"{model}_{file_content_hash}"
             
             # Check cache
@@ -153,7 +153,10 @@ async def run_inference(
     resolved_path: Optional[Path] = None
 
     if file_path:
-        resolved_path = Path(file_path)
+        try:
+            resolved_path = resolve_upload(file_path)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
     elif dataset and dataset_file:
         try:
             # Resolve using service (enforces allowed datasets and basename-only)
@@ -173,7 +176,7 @@ async def run_inference(
         raise HTTPException(status_code=404, detail=f"Audio file not found: {resolved_path}")
 
     # Create cache key based on model and file path
-    file_content_hash = hashlib.md5(str(resolved_path).encode()).hexdigest()
+    file_content_hash = hashlib.md5(str(resolved_path).encode(), usedforsecurity=False).hexdigest()
     cache_key = f"{model}_{file_content_hash}"
     
     # Check if result is cached
@@ -228,14 +231,15 @@ async def batch_whisper_analysis(request: Request):
                 if dataset:
                     file_path = resolve_file(dataset, filename, session_id)
                 else:
-                    file_path = UPLOAD_DIR / filename
-                    if not file_path.exists():
-                        print(f"Warning: File not found: {file_path}")
+                    try:
+                        file_path = resolve_upload(filename)
+                    except FileNotFoundError:
+                        print(f"Warning: File not found: {filename}")
                         missing_count += 1
                         continue
                 
                 # Create cache key (same as used in regular inference)
-                file_content_hash = hashlib.md5(str(file_path).encode()).hexdigest()
+                file_content_hash = hashlib.md5(str(file_path).encode(), usedforsecurity=False).hexdigest()
                 cache_key = f"{model}_{file_content_hash}"
                 
                 # Try to get from cache first
@@ -360,7 +364,10 @@ async def get_whisper_accuracy(request: Request):
         
         # Get file path
         if file_path:
-            resolved_path = Path(file_path)
+            try:
+                resolved_path = resolve_upload(file_path)
+            except FileNotFoundError as e:
+                raise HTTPException(status_code=404, detail=str(e))
         else:
             resolved_path = resolve_file(dataset, dataset_file, session_id)
         
@@ -368,7 +375,7 @@ async def get_whisper_accuracy(request: Request):
             raise HTTPException(status_code=404, detail="Audio file not found")
         
         # Create cache key and get cached prediction
-        file_content_hash = hashlib.md5(str(resolved_path).encode()).hexdigest()
+        file_content_hash = hashlib.md5(str(resolved_path).encode(), usedforsecurity=False).hexdigest()
         cache_key = f"{model}_{file_content_hash}"
         
         cached_result = await get_result(model, cache_key)
@@ -589,13 +596,14 @@ async def batch_wav2vec2_prediction(request: Request):
                 if dataset:
                     file_path = resolve_file(dataset, filename, session_id)
                 else:
-                    file_path = UPLOAD_DIR / filename
-                    if not file_path.exists():
-                        print(f"Warning: File not found: {file_path}")
+                    try:
+                        file_path = resolve_upload(filename)
+                    except FileNotFoundError:
+                        print(f"Warning: File not found: {filename}")
                         continue
                 
                 # Create cache key
-                file_content_hash = hashlib.md5(str(file_path).encode()).hexdigest()
+                file_content_hash = hashlib.md5(str(file_path).encode(), usedforsecurity=False).hexdigest()
                 cache_key = f"wav2vec2_detailed_{file_content_hash}"
                 
                 # Check cache first
@@ -687,7 +695,10 @@ async def get_wav2vec2_detailed_prediction(
     # Resolve file path
     resolved_path = None
     if file_path:
-        resolved_path = Path(file_path)
+        try:
+            resolved_path = resolve_upload(file_path)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
     elif dataset and dataset_file:
         try:
             resolved_path = resolve_file(dataset, dataset_file, session_id)
@@ -703,7 +714,7 @@ async def get_wav2vec2_detailed_prediction(
         raise HTTPException(status_code=404, detail=f"Audio file not found: {resolved_path}")
     
     # Create cache key for detailed predictions (v3 after fixing attention extraction)
-    file_content_hash = hashlib.md5(str(resolved_path).encode()).hexdigest()
+    file_content_hash = hashlib.md5(str(resolved_path).encode(), usedforsecurity=False).hexdigest()
     cache_key = f"wav2vec2_detailed_attention_v3_{file_content_hash}"
     
     # Check if result is cached
@@ -788,7 +799,7 @@ async def get_wav2vec2_detailed_prediction(
             "probabilities": {"unknown": 1.0},
             "confidence": 0.0,
             "attention": None,
-            "error": str(e),
+            "error": "Detailed prediction failed",
             "fallback": True
         }
         logger.info("Returning fallback result for wav2vec2 prediction")
@@ -828,7 +839,7 @@ async def extract_embeddings_endpoint(
             resolved_path = resolve_file(dataset, filename, session_id)
             
             # Create cache key for embeddings
-            file_content_hash = hashlib.md5(str(resolved_path).encode()).hexdigest()
+            file_content_hash = hashlib.md5(str(resolved_path).encode(), usedforsecurity=False).hexdigest()
             cache_key = f"{model}_embeddings_{file_content_hash}"
             
             # Check if embeddings are cached
@@ -939,7 +950,10 @@ async def extract_single_embedding_endpoint(
     # Resolve file path
     resolved_path = None
     if file_path:
-        resolved_path = Path(file_path)
+        try:
+            resolved_path = resolve_upload(file_path)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
     elif dataset and dataset_file:
         try:
             resolved_path = resolve_file(dataset, dataset_file, session_id)
@@ -955,7 +969,7 @@ async def extract_single_embedding_endpoint(
         raise HTTPException(status_code=404, detail=f"Audio file not found: {resolved_path}")
     
     # Create cache key for embeddings
-    file_content_hash = hashlib.md5(str(resolved_path).encode()).hexdigest()
+    file_content_hash = hashlib.md5(str(resolved_path).encode(), usedforsecurity=False).hexdigest()
     cache_key = f"{model}_embeddings_{file_content_hash}"
     
     # Check if embeddings are cached
@@ -1023,14 +1037,15 @@ async def batch_audio_frequency_analysis(request: Request):
                     file_path = resolve_file(dataset, filename, session_id)
                     logger.info(f"Resolved file path: {file_path}")
                 else:
-                    file_path = UPLOAD_DIR / filename
-                    if not file_path.exists():
-                        logger.warning(f"File not found: {file_path}")
+                    try:
+                        file_path = resolve_upload(filename)
+                    except FileNotFoundError:
+                        logger.warning(f"File not found: {filename}")
                         continue
                     logger.info(f"Using upload file path: {file_path}")
                 
                 # Create cache key for audio frequency features
-                file_content_hash = hashlib.md5(str(file_path).encode()).hexdigest()
+                file_content_hash = hashlib.md5(str(file_path).encode(), usedforsecurity=False).hexdigest()
                 cache_key = f"audio_frequency_{file_content_hash}"
                 
                 # Check cache first
@@ -1177,7 +1192,10 @@ async def get_whisper_with_attention(
     # Resolve file path
     resolved_path = None
     if file_path:
-        resolved_path = Path(file_path)
+        try:
+            resolved_path = resolve_upload(file_path)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
     elif dataset and dataset_file:
         try:
             resolved_path = resolve_file(dataset, dataset_file, session_id)
@@ -1193,7 +1211,7 @@ async def get_whisper_with_attention(
         raise HTTPException(status_code=404, detail=f"Audio file not found: {resolved_path}")
     
     # Create cache key for attention predictions (v2 to avoid old cache)
-    file_content_hash = hashlib.md5(str(resolved_path).encode()).hexdigest()
+    file_content_hash = hashlib.md5(str(resolved_path).encode(), usedforsecurity=False).hexdigest()
     cache_key = f"{model}_attention_v2_{file_content_hash}"
     
     # Check if result is cached
@@ -1273,7 +1291,10 @@ async def extract_attention_pairs_endpoint(
         resolved_path: Optional[Path] = None
         
         if file_path:
-            resolved_path = Path(file_path)
+            try:
+                resolved_path = resolve_upload(file_path)
+            except FileNotFoundError as e:
+                raise HTTPException(status_code=404, detail=str(e))
         elif dataset and dataset_file:
             try:
                 print(f">>> RESOLVING FILE: dataset='{dataset}', file='{dataset_file}', session='{session_id}'")
@@ -1308,7 +1329,7 @@ async def extract_attention_pairs_endpoint(
             logger.info(f"Processing dataset file for attention pairs: dataset={dataset}, file={dataset_file}")
         
         # Create cache key following your pattern
-        file_content_hash = hashlib.md5(str(resolved_path).encode()).hexdigest()
+        file_content_hash = hashlib.md5(str(resolved_path).encode(), usedforsecurity=False).hexdigest()
         cache_key = f"{model}_attention_pairs_{file_content_hash}_l{layer_idx}_h{head_idx}"
         
         # Check cache following your pattern

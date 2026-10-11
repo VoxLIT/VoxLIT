@@ -136,9 +136,10 @@ async def upload_files_to_dataset(
                 errors.append(error_msg)
                 logger.error(error_msg)
             except Exception as e:
-                error_msg = f"Failed to upload {file.filename}: {str(e)}"
-                errors.append(error_msg)
-                logger.error(error_msg)
+                # Unexpected errors can carry server paths, so the client only
+                # gets the filename; the detail goes to the log.
+                logger.error(f"Failed to upload {file.filename}: {e}")
+                errors.append(f"Failed to upload {file.filename}")
 
         # Get updated dataset metadata
         dataset_metadata = manager.get_dataset_metadata(dataset_name)
@@ -167,7 +168,7 @@ async def upload_files_to_dataset(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.error(f"Error uploading files to dataset {dataset_name}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to upload files: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to upload files")
 
 
 @router.get("/dataset/list")
