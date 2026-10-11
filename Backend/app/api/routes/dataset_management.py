@@ -131,12 +131,8 @@ async def upload_files_to_dataset(
                 raise HTTPException(status_code=400, detail=str(e))
             except InvalidFilename as e:
                 raise HTTPException(status_code=400, detail=str(e))
-            except ValueError as e:
-                error_msg = f"Failed to upload {file.filename}: {str(e)}"
-                errors.append(error_msg)
-                logger.error(error_msg)
             except Exception as e:
-                # Unexpected errors can carry server paths, so the client only
+                # Exception text can carry server paths, so the client only
                 # gets the filename; the detail goes to the log.
                 logger.error(f"Failed to upload {file.filename}: {e}")
                 errors.append(f"Failed to upload {file.filename}")
